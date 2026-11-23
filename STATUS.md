@@ -13,6 +13,8 @@ Start: 2026-11-23 22:58 IST (2026-11-23 17:28 UTC) · Demo-ready target: 2026-11
 - M8 · 24-page PDF → webp levels + text + D5 zones in ~10 s; 96/96 stories zoned on the stand-in; re-run writes nothing (8 tests, re-run by lead). NOT YET: Punjabi legacy-font PDF, live page replace (JOIN)
 - M5 · editor: ported tools, live refit + fill meter, undo, 2 s autosave, 409 conflict view, lock banner, versions + restore, offline drafts, phone width; no AI button with AI off (15 unit + 10 e2e, re-run by lead). Against a MOCK API until JOIN lands. NOT YET: add page (no spec route)
 - M6 · IDML: zip layout + well-formed XML checked on every export; frames within 0.1 pt of the snapshot (English + Punjabi); same input → same bytes (10 tests, re-run by lead). NOT YET: opens clean in InDesign, links relink, client styles map, Gurmukhi shaping — need InDesign (owner)
+- M9/M10 · reader PWA: thumbnails, swipe, pinch zoom with w400/w1600/w3200 levels, zone tap opens the right story (20/20), search in one edition, offline reopen, embed.js shows cover + opens reader; JS 27 kB (11 kB gzip) (11 unit + 6 e2e, re-run by lead). NOT YET: 4G timing, 360/1440 px, Gurmukhi/Telugu in sheet, HttpSource against the real API. CUT: JWT paywall
+- M2 · assets: ingest + derivatives, focal crop, rule-based cut-out 224 ms IoU 0.977 (3000 px: 430 ms, 0.975), provider-down keeps photo usable (18 tests, re-run by lead). NOT YET: 100-URL dedupe run, text wrap in editor, API retry wiring
 - All packages · 83 tests pass together on main
 - M4 · layout engine ported; prototype SAMPLE matches exactly; 15 English → 4 pages in ~1 s; same plan every run; editor vs headless <0.5 % pixels; D4 snapshot valid (12 tests, re-run by lead). NOT YET: Punjabi page 2 overflow check (fonts were missing; Noto Gurmukhi now installed on host — must also go into the images)
 - Toolchain · Postgres 17.2, Node 22.12, Playwright 1.49.1 Chromium, sharp 0.33.5, Poppler, qpdf 11.3, WAL-G 3.0.5, restic 0.17.3 all PASS on amd64 (docs/toolchain.md). WAL archiving not yet proven: base backup only
@@ -22,13 +24,13 @@ Start: 2026-11-23 22:58 IST (2026-11-23 17:28 UTC) · Demo-ready target: 2026-11
 ## Doing
 - Sub-agent (Sonnet) · JOIN: API routes + worker queues wiring M1 → M4 → M5 → M7 → M8 → reader API, English e2e test (branch join)
 - Sub-agent (Sonnet) · M9 reader PWA + M10 embed.js (branch m9)
-- Sub-agent (Sonnet) · M2 assets: derivatives, focal crop, rule-based cut-out (branch m2)
 ## Next
 - M4 follow-up: auto-plan balances unevenly (one page at 60 % fill); re-check Punjabi overflow with fonts
 - Bake Noto fonts (Gurmukhi + Latin) into the render images / templates/fonts
 - Merging an agent branch: rebase it onto main first. Old base 46d141a → new 0e09a2f (m0, toolchain); old d985ecf → new b9a7234 (m4, m1). Drop any Co-Authored-By line from the branch's own commits.
 - Demo path: M0 → contracts → English ingest → edit/refit → PDF → e-paper
 ## Blocked
+- Off-box backup test: B2 says "Malformed Access Key Id". BACKUP_S3_KEY is 12 hex chars (looks like the Backblaze Account ID); an application key ID is 25 chars starting 003. Scripts ready: scripts/lib/backup-env.sh, ops/postgres/Dockerfile (Postgres + WAL-G image built). Re-test as soon as the key ID is fixed.
 ## Incidents
 - 2026-11-23 18:4x UTC · an unanchored `files/` ignore rule hid apps/api/src/files; removing the m0 worktree deleted it. Restored from the built api image (complete, 1 file), committed, rule anchored to `/files/`. Rule now: check `git status --ignored` before removing any worktree.
 ## WAITING ON OWNER    (what · why · what is stubbed meanwhile)
@@ -46,6 +48,7 @@ Start: 2026-11-23 22:58 IST (2026-11-23 17:28 UTC) · Demo-ready target: 2026-11
 ## DECISION NEEDED
 ## Cut                 (what was cut under the cut order, and when)
 ## Log                 (one line per hour, newest first)
+- 2026-11-23 · Hour 3 · M9, M2 merged; backup test blocked on key ID; lead session switched to Sonnet at the owner's request (Opus for hard debugging/review only).
 - 2026-11-23 · Hour 2–3 · M6 merged; M2 started.
 - 2026-11-23 · Hour 2 · M5 merged; JOIN told the editor's exact routes.
 - 2026-11-23 · Hour 1–2 · M0, M1, M7, M8 merged (83 package tests green on main); stack rebuilt from main; JOIN, M9, M6 started.
