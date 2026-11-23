@@ -138,6 +138,15 @@ importers:
         specifier: 8.11.10
         version: 8.11.10
 
+  packages/assets:
+    dependencies:
+      '@epaper/layout':
+        specifier: workspace:*
+        version: link:../layout
+      sharp:
+        specifier: 0.33.5
+        version: 0.33.5
+
   packages/connectors:
     dependencies:
       '@epaper/core':
