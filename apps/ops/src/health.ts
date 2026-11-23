@@ -183,11 +183,6 @@ export class Health {
           } else red(`${title}: the rule for it is broken (${(e as Error).message}).`, "The service list needs fixing by a developer.");
         }
       }
-      // upstream hint (D9 `needs`): red here because a dependency is red
-      if (state === "red" && def.needs?.length) {
-        const badNeed = def.needs.filter((n: string) => byName.get(n)?.state === "red");
-        if (badNeed.length) { todo = `Fix ${badNeed.join(" and ")} first. This one probably comes back by itself.`; err = `${err} (waiting on ${badNeed.join(", ")})`; }
-      }
       const prev = this.lights.read()[def.name];
       const since = prev && prev.state === state ? prev.since : new Date(now).toISOString();
       const clock = new Date(since);
@@ -195,6 +190,15 @@ export class Health {
       const s: ServiceStatus = { name: def.name, title, state, since: hhmm, since_iso: since, last_error: state === "green" ? null : err, plain, todo: state === "green" ? null : todo, fixes: def.fixes, ...(value ? { value } : {}) };
       byName.set(def.name, s);
       out.push(s);
+    }
+    // upstream hint (D9 `needs`): red here because a dependency is red
+    for (const def of defs) {
+      const s = byName.get(def.name)!;
+      const badNeed = (def.needs ?? []).filter((n: string) => byName.get(n)?.state === "red");
+      if (!dockerError && s.state === "red" && badNeed.length) {
+        s.todo = `Fix ${badNeed.join(" and ")} first. This one probably comes back by itself.`;
+        s.last_error = `${s.last_error} (waiting on ${badNeed.join(", ")})`;
+      }
     }
     if (listError) out.push({ name: "service-list", title: "The list of things to watch", state: "red", since: "--:--", since_iso: new Date(now).toISOString(), last_error: listError, plain: listError, todo: "A developer must put ops/services.yml back. The desk cannot watch anything until then.", fixes: [] });
     this.lights.write(Object.fromEntries(out.map((s) => [s.name, { state: s.state, since: s.since_iso }])));

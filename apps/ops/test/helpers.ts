@@ -35,7 +35,12 @@ export function mkStack(opts: { cfgOver?: Record<string, string>; telegram?: Ale
   const backup = new FakeBackup();
   const api = new FakeApi();
   const down = new Set<string>(); // urls that fail
-  const probe: ReadyProbe = async (url) => (down.has(url) ? { error: "cannot connect" } : { status: 200, body: { ok: true } });
+  const probe: ReadyProbe = async (url) => {
+    if (down.has(url)) return { error: "cannot connect" };
+    const host = /\/\/([^:/]+)/.exec(url)?.[1] ?? "";
+    if (docker.stayBroken.has(host)) return { status: 503, body: { ok: false, checks: { db: "timeout after 5 s" } } };
+    return { status: 200, body: { ok: true } };
+  };
   let t = Date.now();
   const clock = { now: () => t, advance: (ms: number) => { t += ms; } };
   const built = buildApp({ cfg, docker, backup, api, probe, now: clock.now, telegram: opts.telegram ?? null, certProbe: async () => 60, pollMs: 5 });
