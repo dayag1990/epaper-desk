@@ -1,0 +1,27 @@
+{
+  "name": "@epaper/reader",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "prebuild": "pnpm --filter @epaper/core run build",
+    "build": "tsc -p tsconfig.json --noEmit && vite build",
+    "pretypecheck": "pnpm --filter @epaper/core run build",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "pretest:e2e": "pnpm --filter @epaper/core run build && pnpm --filter @epaper/epaper run build",
+    "test:e2e": "playwright test",
+    "dev-server": "node scripts/dev-server.mjs"
+  },
+  "dependencies": {
+    "preact": "10.25.4"
+  },
+  "devDependencies": {
+    "@epaper/core": "workspace:*",
+    "@epaper/epaper": "workspace:*",
+    "@playwright/test": "1.49.1",
+    "typescript": "5.6.3",
+    "vite": "5.4.21",
+    "vitest": "2.1.8"
+  }
+}
