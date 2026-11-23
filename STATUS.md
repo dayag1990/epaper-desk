@@ -11,6 +11,7 @@ Start: 2026-11-23 22:58 IST (2026-11-23 17:28 UTC) · Demo-ready target: 2026-11
 - M1 · cxml/rss/wordpress/scrape/push adapters; BlinkCMS → 9 stories + 1 ad + 7 image refs; rule-based wizard maps 3 unseen sites incl. demo site; re-sync writes nothing; edit bumps rev (30 tests, re-run by lead). NOT YET: cron scheduler, file-drop watcher, /v1/sources (JOIN agent)
 - M7 · screen PDF exact page box to 0.1 mm, fonts embedded, text selectable; ContentXML round-trips (6 tests, re-run by lead). NOT YET: press PDF (needs client press profile; stays experimental)
 - M8 · 24-page PDF → webp levels + text + D5 zones in ~10 s; 96/96 stories zoned on the stand-in; re-run writes nothing (8 tests, re-run by lead). NOT YET: Punjabi legacy-font PDF, live page replace (JOIN)
+- M5 · editor: ported tools, live refit + fill meter, undo, 2 s autosave, 409 conflict view, lock banner, versions + restore, offline drafts, phone width; no AI button with AI off (15 unit + 10 e2e, re-run by lead). Against a MOCK API until JOIN lands. NOT YET: add page (no spec route)
 - All packages · 83 tests pass together on main
 - M4 · layout engine ported; prototype SAMPLE matches exactly; 15 English → 4 pages in ~1 s; same plan every run; editor vs headless <0.5 % pixels; D4 snapshot valid (12 tests, re-run by lead). NOT YET: Punjabi page 2 overflow check (fonts were missing; Noto Gurmukhi now installed on host — must also go into the images)
 - Toolchain · Postgres 17.2, Node 22.12, Playwright 1.49.1 Chromium, sharp 0.33.5, Poppler, qpdf 11.3, WAL-G 3.0.5, restic 0.17.3 all PASS on amd64 (docs/toolchain.md). WAL archiving not yet proven: base backup only
@@ -18,7 +19,6 @@ Start: 2026-11-23 22:58 IST (2026-11-23 17:28 UTC) · Demo-ready target: 2026-11
 - Repo · Co-Authored-By lines stripped from the 3 early commits on main (tree unchanged; backup branch backup/pre-strip)
 - Repo · /srv/epaper/desk, git main, D7 folders, spec at docs/build-spec.json
 ## Doing
-- Sub-agent (Sonnet) · M5 editor: ported tools, live refit, save/versions/locks (branch m5)
 - Sub-agent (Sonnet) · JOIN: API routes + worker queues wiring M1 → M4 → M5 → M7 → M8 → reader API, English e2e test (branch join)
 - Sub-agent (Sonnet) · M9 reader PWA + M10 embed.js (branch m9)
 - Sub-agent (Sonnet) · M6 IDML export + structural validator (branch m6)
@@ -44,6 +44,7 @@ Start: 2026-11-23 22:58 IST (2026-11-23 17:28 UTC) · Demo-ready target: 2026-11
 ## DECISION NEEDED
 ## Cut                 (what was cut under the cut order, and when)
 ## Log                 (one line per hour, newest first)
+- 2026-11-23 · Hour 2 · M5 merged; JOIN told the editor's exact routes.
 - 2026-11-23 · Hour 1–2 · M0, M1, M7, M8 merged (83 package tests green on main); stack rebuilt from main; JOIN, M9, M6 started.
 - 2026-11-23 · Hour 1 · M4 merged; M7 and M5 started. Running: M0, M1, M5, M7, M8.
 - 2026-11-23 · Hour 0–1 · toolchain + fixtures merged; M8 started. Running: M0, M1, M4, M8.
