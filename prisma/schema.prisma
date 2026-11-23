@@ -26,6 +26,7 @@ model Paper {
   tz         String    @default("UTC")
   domain     String?
   theme      Json?
+  ai_enabled Boolean   @default(false) // M12: the owner's AI switch, off until an owner turns it on
   created_at DateTime  @default(now())
   updated_at DateTime  @default(now()) @updatedAt
   deleted_at DateTime?
