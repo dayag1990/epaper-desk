@@ -1,11 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { Article } from "@epaper/core";
 import type { Api } from "./api";
 import { plainError } from "./errors";
 import { PageView } from "./PageView";
-import { PAGE_SIZES, addStory, applyTool, ensureSlot, placeArticle, setCutout, setFocal, setPageSize, setPhoto, setRatio, setStatus, EMPTY_ASSET, type ToolAction } from "./tools";
+import { PAGE_SIZES, addStory, applyTool, ensureSlot, moveTo, resizeItem, placeArticle, setCutout, setFocal, setPageSize, setPhoto, setRatio, setStatus, EMPTY_ASSET, type ToolAction } from "./tools";
 import type { EditorStore } from "./store";
 import type { EditorConfig } from "./config";
+import { KEY_RUN_MS } from "./flow";
 import type { VersionRecord } from "./types";
 
 const CROPS: [string, number][] = [["Wide 3:1", 3], ["16:9", 16 / 9], ["3:2", 1.5], ["4:3", 4 / 3], ["Square", 1], ["Tall 3:4", 0.75]];
@@ -14,13 +15,42 @@ type Panel = null | "photo" | "tray" | "versions" | "ai";
 export function App({ store, api, cfg }: { store: EditorStore; api: Api; cfg: EditorConfig }) {
   const s = useSyncExternalStore(store.subscribe, store.getSnapshot);
   const [editing, setEditing] = useState(() => window.innerWidth >= 900);
-  const [zoom, setZoom] = useState(0.5);
+  const [zoom, setZoomRaw] = useState(0.5);
+  const anchor = useRef<{ r: number; ax: number; ay: number; vx: number; vy: number } | null>(null);
   const [panel, setPanel] = useState<Panel>(null);
   const [delArmed, setDelArmed] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const pickFor = useRef<string | null>(null);
+
+  /**
+   * Zoom keeps one point of the page still on screen: the middle of the selected block (so it never scrolls out of view),
+   * else the middle of the visible area. The scroll position is corrected after the page has been re-laid out.
+   */
+  const setZoom = useCallback((f: (z: number) => number) => {
+    setZoomRaw((z) => {
+      const nz = f(z);
+      const sc = scroller.current;
+      if (sc && nz !== z) {
+        const sr = sc.getBoundingClientRect();
+        const sel = sc.querySelector<HTMLElement>(".story.sel");
+        const r = sel?.getBoundingClientRect();
+        const vx = r ? r.left + r.width / 2 - sr.left : sc.clientWidth / 2;
+        const vy = r ? r.top + r.height / 2 - sr.top : sc.clientHeight / 2;
+        anchor.current = { r: nz / z, ax: sc.scrollLeft + vx, ay: sc.scrollTop + vy, vx, vy };
+      }
+      return nz;
+    });
+  }, []);
+  useLayoutEffect(() => {
+    const a = anchor.current, sc = scroller.current;
+    anchor.current = null;
+    if (!a || !sc) return;
+    // content coordinates scale with the zoom (the stage has 8px padding that does not)
+    sc.scrollLeft = (a.ax - 8) * a.r + 8 - a.vx;
+    sc.scrollTop = (a.ay - 8) * a.r + 8 - a.vy;
+  }, [zoom]);
 
   const pid = s.active;
   const doc = pid ? s.docs[pid] : undefined;
@@ -49,7 +79,7 @@ export function App({ store, api, cfg }: { store: EditorStore; api: Api; cfg: Ed
   // fit the page to the screen width
   const fitZoom = useCallback(() => {
     if (!template || !scroller.current) return;
-    setZoom(Math.max(0.15, Math.min(1, (scroller.current.clientWidth - 16) / template.canvas_px)));
+    setZoom(() => Math.max(0.15, Math.min(1, (scroller.current!.clientWidth - 16) / template.canvas_px)));
   }, [template]);
   const fitted = useRef<string | null>(null);
   useEffect(() => {
@@ -73,19 +103,23 @@ export function App({ store, api, cfg }: { store: EditorStore; api: Api; cfg: Ed
   if (!pid || !doc || !template) return <div className="center">This edition has no pages yet.</div>;
 
   const edit = (docs: ReturnType<typeof ensureSlot>, touched: string[], key?: string) => store.commit(docs, touched, key);
-  const tool = (a: ToolAction) => {
+  const tool = (a: ToolAction, run?: string) => {
     if (!s.selected) return;
-    if (a === "del") {
+    if (run) { /* keyboard step: no delete arming */ } else if (a === "del") {
       if (!delArmed) { setDelArmed(true); return; }
       setDelArmed(false);
     } else setDelArmed(false);
     const r = applyTool(s.docs, pid, s.selected, a, { order: s.order, templateOf: store.templateOf, hasSrc });
     if (!r) return;
-    if (!edit(r.docs, r.touched)) return;
+    if (!store.commit(r.docs, r.touched, run, run ? KEY_RUN_MS : undefined)) return;
     if (a === "del") store.select(null);
     if (r.pageId !== pid) { void store.setActive(r.pageId).then(() => store.select(s.selected)); }
     if (r.note) store.notify(r.note);
   };
+  const afterGesture = (r: { docs: typeof s.docs; touched: string[] } | null, key?: string) => {
+    if (r) store.commit(r.docs, r.touched, key, key ? KEY_RUN_MS : undefined);
+  };
+  const toolCtx = { order: s.order, templateOf: store.templateOf, hasSrc };
   const pickImage = (itemId: string) => { pickFor.current = itemId; fileRef.current?.click(); };
   const onFile = async (f: File | undefined) => {
     const id = pickFor.current;
@@ -150,7 +184,7 @@ export function App({ store, api, cfg }: { store: EditorStore; api: Api; cfg: Ed
       {s.save.state === "offline" && <div className="banner warn" role="alert">Can't reach the server. Keep going: every word is kept on this device and saves by itself when it is back.</div>}
 
       <div className="bar2">
-        <span className={`meter ${m?.state ?? ""}`} data-testid="fill-meter" role="status">
+        <span className={`meter ${m?.state ?? ""}`} data-testid="fill-meter" data-refits={s.refits} data-pct={m?.pct ?? ""} data-zoom={zoom.toFixed(4)} role="status">
           {m ? m.label : fillPct != null ? `${fillPct}% full` : "Measuring…"}
         </span>
         {m?.lowRes.map((t) => <span key={t} className="meter over">{t}</span>)}
@@ -172,7 +206,7 @@ export function App({ store, api, cfg }: { store: EditorStore; api: Api; cfg: Ed
         {canEdit && doc.status === "subbed" && <button className="btn y" data-testid="approve" onClick={() => void store.approve(pid, !m || m.state !== "over")}>Approve and lock</button>}
       </div>
 
-      <div className="stage" ref={scroller}>
+      <div className="stage" ref={scroller} data-testid="stage" onClick={(e) => { if (e.target === e.currentTarget) store.select(null); }}>
         <PageView
           doc={doc}
           template={template}
@@ -184,6 +218,9 @@ export function App({ store, api, cfg }: { store: EditorStore; api: Api; cfg: Ed
           onSelect={(id) => store.select(id)}
           onPickImage={pickImage}
           onMeter={(mt) => store.refitted(pid, mt)}
+          onKeyStep={(a, id) => tool(a, `kbd:${id}:${a}`)}
+          onMoveTo={(id, to) => afterGesture({ docs: moveTo(s.docs, pid, id, to), touched: [pid] })}
+          onResize={(id, edge, v) => afterGesture(resizeItem(s.docs, pid, id, edge, v, toolCtx))}
         />
       </div>
 

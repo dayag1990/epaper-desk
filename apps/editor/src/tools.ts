@@ -1,5 +1,6 @@
 import type { PageDoc, PageItem } from "@epaper/core";
-import { defaultRatio, packedSpans, type Template } from "./layout";
+import { defaultRatio, defaultSpan, packedSpans, type Template } from "./layout";
+import { clampCols, clampSpan, moveInOrder, rowStep, slotsOf } from "./flow";
 
 export type Docs = Record<string, PageDoc>;
 
@@ -11,7 +12,7 @@ export interface ToolCtx {
   /** True when this asset id has a picture we can show (so "Remove" can tell a filled slot from an empty one). */
   hasSrc(assetId: string): boolean;
 }
-export type ToolAction = "span-" | "span+" | "cols-" | "cols+" | "hs-" | "hs+" | "ar-" | "ar+" | "mv-" | "mv+" | "imgx" | "del";
+export type ToolAction = "span-" | "span+" | "cols-" | "cols+" | "hs-" | "hs+" | "ar-" | "ar+" | "mv-" | "mv+" | "row-" | "row+" | "imgx" | "del";
 export interface ToolResult {
   docs: Docs;
   /** Page the item is on afterwards (changes on a move across pages). */
@@ -47,13 +48,10 @@ export function applyTool(docs: Docs, pageId: string, itemId: string, a: ToolAct
 
   if (a === "span-" || a === "span+") {
     const v = clamp(spanNow + (a === "span+" ? 1 : -1), 1, 8);
-    let cols = colsNow;
-    if (item.kind !== "ad" && colsNow === spanNow) cols = v;
-    if (cols > v) cols = v;
-    return done(withItem(docs, pageId, itemId, (i) => ({ ...i, span: v, cols })));
+    return done(withItem(docs, pageId, itemId, (i) => withSpan(i, spanNow, v)));
   }
   if (a === "cols-" || a === "cols+") {
-    const v = clamp(colsNow + (a === "cols+" ? 1 : -1), 1, 8);
+    const v = clampCols(colsNow + (a === "cols+" ? 1 : -1), spanNow);
     return done(withItem(docs, pageId, itemId, (i) => ({ ...i, span: spanNow, cols: v })));
   }
   if (a === "hs-" || a === "hs+") {
@@ -88,6 +86,10 @@ export function applyTool(docs: Docs, pageId: string, itemId: string, a: ToolAct
       note: `Moved to page ${docs[target]!.page.no}`,
     };
   }
+  if (a === "row-" || a === "row+") {
+    const to = rowStep(doc.items.map((i) => i.span ?? defaultSpan(i, t.columns)), idx, a === "row+" ? 1 : -1, t.columns);
+    return to == null ? null : done(moveTo(docs, pageId, itemId, to));
+  }
   if (a === "imgx") {
     if (!item.image) return null;
     const filled = ctx.hasSrc(item.image.asset_id);
@@ -104,6 +106,66 @@ export function applyTool(docs: Docs, pageId: string, itemId: string, a: ToolAct
     return done({ ...docs, [pageId]: { ...doc, items: doc.items.filter((i) => i.id !== itemId) } });
   }
   return null;
+}
+
+/** Move an item inside its page so it ends up at index `to` (span and cols unchanged; the packer reflows). */
+export function moveTo(docs: Docs, pageId: string, itemId: string, to: number): Docs {
+  const d = docs[pageId];
+  const from = d?.items.findIndex((i) => i.id === itemId) ?? -1;
+  if (!d || from < 0 || from === to) return docs;
+  return { ...docs, [pageId]: { ...d, items: moveInOrder(d.items, from, to) } };
+}
+
+/** The same width rule as the span+/- buttons: text columns follow when they matched the width, and never exceed it. */
+function withSpan(i: PageItem, spanNow: number, v: number): PageItem {
+  const colsNow = i.cols ?? (i.kind === "ad" ? 1 : spanNow);
+  let cols = colsNow;
+  if (i.kind !== "ad" && colsNow === spanNow) cols = v;
+  if (cols > v) cols = v;
+  return { ...i, span: v, cols };
+}
+
+/**
+ * Edge handles. "e" / "w" set the width to `value` whole columns; "s" sets the text columns.
+ * Dragging the LEFT edge keeps the right edge where it is when the block has row-mates before it:
+ * they give up (or take back) the columns. When they cannot, only the width changes.
+ */
+export function resizeItem(docs: Docs, pageId: string, itemId: string, edge: "e" | "w" | "s", value: number, ctx: ToolCtx): ToolResult | null {
+  const doc = docs[pageId];
+  const idx = doc?.items.findIndex((i) => i.id === itemId) ?? -1;
+  if (!doc || idx < 0) return null;
+  const t = ctx.templateOf(pageId);
+  const packed = packedSpans(doc, t);
+  const spanNow = packed[idx]!;
+  const item = doc.items[idx]!;
+  const done = (d: Docs): ToolResult => ({ docs: d, pageId, touched: [pageId] });
+  if (edge === "s") {
+    const v = clampCols(value, spanNow);
+    if (v === (item.cols ?? (item.kind === "ad" ? 1 : spanNow))) return null;
+    return done(withItem(docs, pageId, itemId, (i) => ({ ...i, span: spanNow, cols: v })));
+  }
+  const v = clampSpan(value, t.columns);
+  if (v === spanNow) return null;
+  let items = doc.items.map((i) => (i.id === itemId ? withSpan(i, spanNow, v) : i));
+  if (edge === "w") {
+    const slots = slotsOf(doc.items.map((i) => i.span ?? defaultSpan(i, t.columns)), t.columns);
+    const mates: number[] = [];
+    for (let j = idx - 1; j >= 0 && slots[j]!.row === slots[idx]!.row; j--) mates.push(j);
+    const delta = v - spanNow;
+    if (delta < 0 && mates.length) {
+      const j = mates[0]!;
+      items = items.map((i, n) => (n === j ? withSpan(i, packed[j]!, packed[j]! - delta) : i));
+    } else if (delta > 0 && mates.reduce((a, j) => a + packed[j]! - 1, 0) >= delta) {
+      let need = delta;
+      for (const j of mates) {
+        const take = Math.min(need, packed[j]! - 1);
+        if (take > 0) items = items.map((i, n) => (n === j ? withSpan(i, packed[j]!, packed[j]! - take) : i));
+        need -= take;
+        if (!need) break;
+      }
+    }
+  }
+  return done({ ...docs, [pageId]: { ...doc, items } });
 }
 
 /** Add / swap a photo (prototype `img`): creates the slot when the story has none. */
