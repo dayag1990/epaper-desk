@@ -153,13 +153,13 @@ prune_due() {
 cmd_daemon() {
   mkdir -p "$BASE_DIR" 2>/dev/null; [ -w "$DATA" ] || { echo "backup: $DATA is not writable" >&2; exit 1; }
   for d in "$WAL_DIR" "$BASE_DIR"; do [ -d "$d" ] && [ -w "$d" ] || { echo "backup: $d is missing or not writable; run scripts/backup-init.sh" >&2; exit 1; }; done
-  st_set '.'
+  st_set '.prune.last_ok = (.prune.last_ok // $now)'   # first clean-up happens at the next 03:30, not at start
   local interval=${PUSH_INTERVAL:-60} last_bb=0 last_pr=0
   log "started: push every ${interval}s, base backup 03:00 UTC, keep $KEEP_BASEBACKUPS"
   trap 'log "stopping"; exit 0' TERM INT
   while :; do
     [ -f "$LOCKDIR/role.ok" ] || init_role >/dev/null 2>&1 || true
-    if bb_due && [ $(( $(date +%s) - last_bb )) -gt 900 ]; then last_bb=$(date +%s); ( cmd_basebackup ) & fi
+    if [ -f "$LOCKDIR/role.ok" ] && bb_due && [ $(( $(date +%s) - last_bb )) -gt 900 ]; then last_bb=$(date +%s); ( cmd_basebackup ) & fi
     if prune_due && [ $(( $(date +%s) - last_pr )) -gt 3600 ]; then last_pr=$(date +%s); ( cmd_prune ) & fi
     ( cmd_push ) &
     sleep "$interval" & wait $!
