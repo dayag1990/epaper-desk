@@ -149,6 +149,8 @@ This is the demo box and may become the client's server after approval. Either w
 - Sonnet sub-agents: routine coding, tests, refactors, one module per agent, with a narrow brief and the files it may touch.
 - Haiku sub-agents: searches, file reads, log scanning, simple edits.
 - Fable: where it fits better, such as writing plain-words copy, `RUNBOOK.md` and owner-facing errors.
+- At most 2 background agents run at the same time (owner rule). A third waits in the queue in `STATUS.md` under Next until a slot frees.
+- Sub-agents use Sonnet. Haiku for searches, log reads and simple edits. Never an Opus sub-agent.
 - Keep context small: summarise, never re-read large files. Read the spec through `docs/build-spec.json` by key, not whole.
 - Usage limit hit: write progress to `STATUS.md` first, then wait for the reset and resume from `STATUS.md`.
 - Fully autonomous. Do not ask the owner questions. Blockers go under WAITING ON OWNER with the stand-in used.

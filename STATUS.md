@@ -26,9 +26,9 @@ Start: 2026-11-23 22:58 IST (2026-11-23 17:28 UTC) · Demo-ready target: 2026-11
 - Repo · /srv/epaper/desk, git main, D7 folders, spec at docs/build-spec.json
 ## Doing
 - Sub-agent (Sonnet) · M13 ops desk: login + TOTP, lights, fix buttons, alerts (branch ops)
-- Sub-agent (Sonnet) · Demo rehearsal: demo data into the live stack, beats 1–7 through the real screens, screenshots (branch demo)
 - Sub-agent (Sonnet) · M13 backup: local WAL archive + nightly basebackup + restic to B2 every minute, restore.sh, drill (branch backup)
 ## Next
+- QUEUED (max 2 agents at once): Demo rehearsal on the live stack, beats 1–7 + Punjabi beat 8 via Playwright, screenshots; brief kept, worktree ../wt-demo (branch demo, empty). Start when the ops desk or backup agent finishes.
 - Build order on deploy: `pnpm --filter @epaper/editor --filter @epaper/admin --filter @epaper/reader build` THEN `docker compose up -d --build` (Dockerfile copies built dist folders; restore.sh must do this)
 - Worker `ai` queue still reads global AI_ENABLED (no AI job exists yet; M3 last)
 - Load the English demo into the LIVE stack and walk beats 1–7 by hand-through-browser (Playwright screenshots); beat 8 (Punjabi cxml)
