@@ -1,0 +1,1494 @@
+{
+  "document": "E-Paper Desk: build architecture",
+  "version": "1.1",
+  "date": "2026-11-17",
+  "new_in_this_version": "M13 ops desk + recovery · the 72-hour clock in section F · queue inside Postgres, no Redis · files on disk, no MinIO · contracts D9 health and D10 ops API · run 4",
+  "how_to_use": [
+    "This JSON is the full content of the drawing. Build from it.",
+    "Order: build_order.step_0 first (it includes the M13 safety net), then the three tracks in parallel, then join.",
+    "clock_72h gives the hour budget and the exit check for every block. recovery holds the no-data-loss targets.",
+    "decisions_closed are settled. Do not reopen them.",
+    "A module is done only when every item in its done_when list passes.",
+    "Contracts D1-D5 are frozen as zod schemas in packages/core before module work starts.",
+    "Items in needs.from_client are inputs to request from the lead. Do not invent them.",
+    "The default stack may be changed by the lead only if every contract and interface below is kept."
+  ],
+  "goal": "Any website's articles become editable newspaper pages, go to InDesign as IDML for final polish, and the final PDF becomes a tappable e-paper. Many papers, any language, new sites plug in by configuration.",
+  "default_stack": {
+    "language": "TypeScript monorepo (pnpm)",
+    "api": "Fastify + zod, OpenAPI at /docs",
+    "db": "Postgres + Prisma",
+    "queue": "pg-boss, inside Postgres (no Redis)",
+    "storage": "write-once files on local disk named by content hash; optional S3 driver (no MinIO)",
+    "backups": "WAL-G (Postgres) + restic (files) to an S3 bucket off the box",
+    "ops": "apps/ops: a standalone ops desk service",
+    "render": "Playwright Chromium",
+    "editor_admin": "React + Vite",
+    "reader": "Preact static app + service worker",
+    "pdf_tools": "Poppler CLI, qpdf, Tesseract, Ghostscript (phase 2)",
+    "images": "sharp (libvips)",
+    "ai": "Claude API, model id from env",
+    "deploy": "Docker Compose + Caddy on one Linux box"
+  },
+  "rules": [
+    {
+      "n": 1,
+      "title": "ONE ARTICLE SHAPE",
+      "text": "Every source is mapped into the canonical Article (D1). Nothing downstream knows or cares where it came from."
+    },
+    {
+      "n": 2,
+      "title": "ONE RENDERER",
+      "text": "A page is HTML + CSS drawn by Chromium, in the editor and on the server. Same package, same pixels."
+    },
+    {
+      "n": 3,
+      "title": "ONE SNAPSHOT",
+      "text": "All geometry leaves as the Layout Snapshot (D4): frames in mm, made by the one renderer. No exporter reads the editor's live DOM."
+    },
+    {
+      "n": 4,
+      "title": "TWO TRUTHS",
+      "text": "Browser = content truth. InDesign PDF = print truth. E-paper is built from the final PDF whenever one exists."
+    },
+    {
+      "n": 5,
+      "title": "AI SUGGESTS",
+      "text": "The editor decides. Nothing is applied without a tap. No new facts. The language never changes."
+    },
+    {
+      "n": 6,
+      "title": "PAPER_ID EVERYWHERE",
+      "text": "Many papers from the first migration: every row, every file key, every job carries paper_id."
+    },
+    {
+      "n": 7,
+      "title": "SAFE TO RE-RUN",
+      "text": "Everything slow is a queue job with an idempotency key. Running it twice changes nothing."
+    },
+    {
+      "n": 8,
+      "title": "FIXABLE BY THE OWNER",
+      "text": "Every service has a light, a restart, its logs and a way back on the ops desk (M13). State lives in two places only, both copied off the box."
+    }
+  ],
+  "lanes": [
+    {
+      "no": "1",
+      "name": "INGEST",
+      "modules": [
+        "M1",
+        "M2"
+      ]
+    },
+    {
+      "no": "2",
+      "name": "STORE",
+      "modules": [
+        "M0"
+      ]
+    },
+    {
+      "no": "3",
+      "name": "BUILD PAGES",
+      "modules": [
+        "M3",
+        "M4",
+        "M5"
+      ]
+    },
+    {
+      "no": "4",
+      "name": "EXPORT",
+      "modules": [
+        "M6",
+        "M7"
+      ]
+    },
+    {
+      "no": "5",
+      "name": "E-PAPER",
+      "modules": [
+        "M8",
+        "M9",
+        "M10",
+        "M11"
+      ]
+    },
+    {
+      "no": "",
+      "name": "ALL LANES",
+      "modules": [
+        "M12",
+        "M13"
+      ]
+    }
+  ],
+  "external_systems": [
+    "Any website / CMS (the client's)",
+    "InDesign desk (client licence + operator)",
+    "Printing press",
+    "Claude API",
+    "Readers",
+    "Off-box backup bucket (any S3)",
+    "The owner's phone (alerts)"
+  ],
+  "decisions_closed": [
+    "TypeScript monorepo on pnpm",
+    "Postgres is the only database. The job queue lives inside it (pg-boss). No Redis",
+    "Files on local disk, named by content hash, written once. S3 driver optional. No MinIO",
+    "Backups: WAL-G for Postgres and restic for files, to an S3 bucket off the box",
+    "State lives only in Postgres and the files folder",
+    "One renderer: HTML + CSS in Chromium, for the editor and the server",
+    "InDesign hand-off is IDML. No InDesign Server",
+    "E-paper is built from the final PDF whenever one exists",
+    "The ops desk is its own service and never depends on the API, the worker or Postgres"
+  ],
+  "recovery": {
+    "state_lives_in": [
+      "Postgres: rows + the job queue",
+      "the files folder: named by content hash, written once"
+    ],
+    "postgres": "archive_timeout 60 s; WAL-G wal-push to the off-box bucket; base backup nightly; 30 days kept; point-in-time restore into a second Postgres, compare row counts, then switch; the old one kept 7 days",
+    "files": "restic snapshot to the off-box bucket every 15 min; soft delete for 30 days; restore one file, one edition or everything",
+    "config": ".env, ops/services.yml and the release list ride in the same encrypted snapshot",
+    "releases": "tagged image sets, last 5 kept; expand-only migrations, so any of them runs on today's database",
+    "editor": "unsaved typing is kept in the browser (IndexedDB) and saved when the API returns",
+    "targets": {
+      "crash_restart_bad_release_power_cut": "nothing saved is lost",
+      "dead_disk_database": "at most about 1 minute of writes",
+      "dead_disk_files": "at most 15 minutes",
+      "one_service_back": "1 minute",
+      "bad_release_rolled_back": "2 minutes",
+      "whole_box_on_new_hardware": "60 minutes"
+    },
+    "honest_limits": [
+      "The ops desk lives on the same box. If the box is dead, run scripts/restore.sh on a new one",
+      "Zero loss on a dead disk needs a second server with a synchronous replica",
+      "The desk fixes services, queues, releases and data. A logic bug present in every kept release still needs a code fix"
+    ],
+    "tool_note": "WAL-G and restic are the default tools. The targets are the contract: swap a tool only if every M13 drill still passes."
+  },
+  "modules": [
+    {
+      "id": "M0",
+      "name": "PLATFORM CORE",
+      "lane": "STORE",
+      "status": "BUILD NOW",
+      "needs": "—",
+      "purpose": "The floor every module stands on.",
+      "tech": "TypeScript monorepo (pnpm) · Fastify + zod → OpenAPI · Postgres + Prisma · pg-boss job queue inside Postgres · files on disk or any S3 bucket · Docker Compose · Caddy",
+      "build": [
+        "Repo (D7): apps/{api, worker, ops, editor, admin, reader} · packages/{core, connectors, assets, ai, layout, idml, export, epaper}",
+        "packages/core: zod schemas for Article, PageDoc, LayoutSnapshot, Zones — the only place types are defined",
+        "Auth: email + password (argon2), session cookie; roles owner · editor · sub · designer · viewer per paper; API key per source",
+        "Queues on pg-boss, inside Postgres: ingest · assets · ai · layout · export · epaper — retries with backoff, job log, dead-letter list",
+        "Files: {paper}/{yyyy-mm-dd}/{kind}/{hash}.{ext}, written once and never overwritten; drivers fs (default) and s3; signed URLs for anything private",
+        "State lives in exactly two places: Postgres and the files folder. Every container can be deleted and rebuilt from its image",
+        "Migrations are expand-only: add, never rename or drop in the same release, so any of the last 5 releases runs on today's database",
+        "Audit row on every write; soft delete for 30 days; every service answers /healthz and /readyz (D9)"
+      ],
+      "interfaces": [
+        "REST /v1/* JSON; errors {code, message, details}; OpenAPI served at /docs",
+        "Every table has paper_id; every request resolves its paper from the session or API key",
+        "Job envelope {type, paper_id, payload, idempotency_key}",
+        "Env: DATABASE_URL FILES_DRIVER FILES_ROOT S3_* ANTHROPIC_API_KEY APP_SECRET"
+      ],
+      "done_when": [
+        "docker compose up gives healthy api, worker, ops, postgres and proxy on one 4 vCPU / 16 GB Linux box",
+        "Seed creates a demo paper + owner; a viewer is refused on save",
+        "A failing job retries 3 times, then shows in the dead-letter list",
+        "A test proves paper A cannot read paper B's rows or files",
+        "Stop and start the whole stack: every row, file and queued job is still there"
+      ]
+    },
+    {
+      "id": "M1",
+      "name": "CONNECTOR HUB",
+      "lane": "INGEST",
+      "status": "PART-BUILT",
+      "needs": "M0",
+      "purpose": "Any website in. One Article out.",
+      "tech": "fast-xml-parser · rss-parser · undici · cheerio · @mozilla/readability · jsonpath-plus",
+      "build": [
+        "Connector interface: discover(cfg, since) lists refs; fetch(cfg, ref) returns a RawItem",
+        "Kinds in v1: push · rss · wordpress · rest · cxml · scrape (ghost, drupal, newsml arrive later as adapters)",
+        "normalize(raw, mapping) → Article; zod-validate; reject with reasons, never half-save",
+        "Upsert key (paper_id, source_id, external_id); content_hash decides whether it changed",
+        "Port parseCXML() from the prototype: copes with image tags nested mid-sentence, quote blocks, missing ids",
+        "Scheduler per source (cron), push endpoint with HMAC check, file-drop watcher",
+        "Mapping wizard + TEST endpoint: a dry run that returns 5 parsed articles and every error"
+      ],
+      "interfaces": [
+        "IN wire 1: RawItem (XML node · feed item · JSON · HTML)",
+        "OUT wire 2: Article (D1) · wire 3: asset jobs",
+        "POST /v1/ingest/articles · POST /v1/sources · POST /v1/sources/:id/test · POST /v1/sources/:id/sync",
+        "Internal events article.created · article.updated"
+      ],
+      "done_when": [
+        "BlinkCMS Punjabi sample → 2 pages, 9 stories + 1 advert, 7 image refs; ContentXML export re-parses identical",
+        "A stock WordPress site and a plain RSS feed ingest with mapping only, zero code",
+        "HTML door gets headline, body and lead image from 3 unseen news sites on wizard defaults",
+        "Re-sync with no changes writes nothing; an edited article bumps rev and flags the pages that use it"
+      ]
+    },
+    {
+      "id": "M2",
+      "name": "ASSET PIPELINE",
+      "lane": "INGEST",
+      "status": "PART-BUILT",
+      "needs": "M0",
+      "purpose": "Every picture ready for screen, print and cut-out.",
+      "tech": "sharp (libvips) · existing Card Maker cut-out model in the browser · Poppler for PDF artwork",
+      "build": [
+        "Download originals (follow redirects, size cap, type sniff); store once per content hash",
+        "Derivatives: thumb 400 px and web 1600 px WebP; the print file is always the untouched original",
+        "Focal point: subject box from the Card Maker model in the browser (SEG.subject), sharp attention crop on the server; a tap overrides",
+        "Cut-out provider A, already built: Card Maker's in-browser model, SEG.cut(img) → canvas + mask → uploaded as asset kind cutout",
+        "Cut-out provider B: a server worker with the same output, for auto-plan and batch runs",
+        "Print check: needed px = frame width in inches × 150; warn in the editor, block nothing",
+        "PDF or EPS artwork named by feeds (feature-1.pdf) → rasterise at 300 dpi"
+      ],
+      "interfaces": [
+        "IN wire 3: {article_id, url} or an upload",
+        "OUT: Asset row + files; derivatives {thumb, web, cutout} · focal [x, y] · px [w, h]",
+        "POST /v1/assets · POST /v1/assets/:id/cutout · GET /v1/assets/:id",
+        "Wire 4: CutoutProvider.cut(image) → {png_alpha, subject_box} — one interface, two providers"
+      ],
+      "done_when": [
+        "100 mixed JPG / PNG / WebP URLs ingest; duplicates are stored once",
+        "A cut-out shows in the editor with text wrapping its outline within 10 s",
+        "Low-res warning matches the prototype at Broadsheet and Tabloid",
+        "Provider down: the photo is still usable, the cut-out retries, the editor is told"
+      ]
+    },
+    {
+      "id": "M3",
+      "name": "AI ASSIST",
+      "lane": "BUILD PAGES",
+      "status": "BUILD NOW",
+      "needs": "M0",
+      "purpose": "Copy-fit help. Never the author.",
+      "tech": "Claude API (model id from env) · JSON-only outputs · results cached by content hash",
+      "build": [
+        "Tasks: shorten_headline(max_chars, n=3) · standfirst · caption · pull_quote · trim_to_fit(words_over) · classify_section",
+        "trim_to_fit returns paragraph / sentence indexes to cut — never rewritten text",
+        "pull_quote must be an exact substring of the body; checked in code",
+        "Output language = article language (Punjabi stays Punjabi); a mismatch is rejected",
+        "Every suggestion is stored with prompt hash, model, and who accepted or rejected it"
+      ],
+      "interfaces": [
+        "POST /v1/ai/suggest {task, article_id, constraints} → {suggestions[]}",
+        "Wire 7 → the editor's AI panel and the M4 fit loop, as proposals only",
+        "Queue ai; 30 s timeout; on failure there is no suggestion and the editor carries on"
+      ],
+      "done_when": [
+        "3 headline options within max_chars for the English and the Punjabi sample",
+        "No saved page ever changes without an accept event in the audit log",
+        "Pull-quote substring test passes on 50 articles",
+        "API key missing → AI panel hidden, nothing else breaks"
+      ]
+    },
+    {
+      "id": "M4",
+      "name": "LAYOUT ENGINE + TEMPLATES",
+      "lane": "BUILD PAGES",
+      "status": "PART-BUILT",
+      "needs": "M0 · M1 · M2",
+      "purpose": "Turns a day's articles into pages that fit.",
+      "tech": "packages/layout: HTML + CSS grid shared by editor and worker · Playwright Chromium · self-hosted woff2 fonts",
+      "build": [
+        "Template = page size + 8-column grid + slots[{id, span, cols, kind, words_min, words_max, image}] + CSS + fonts",
+        "Slot ids stay compatible with feed names: story_col_span-N-k · sidebar · feature-n · editorial · adverts-n",
+        "Port from the prototype: row packer (stretch the last story so no hole is left), fit meter, auto-fit text size",
+        "Auto-plan: section → page; pick a template variant by story count and lengths; fill slots by priority; honour layout_hint",
+        "Fit loop per page: render → measure fill % → body size within [min, max] pt → image ratio → ask M3 for a cut list → flag overflow",
+        "Snapshot: getBoundingClientRect of every frame → mm → LayoutSnapshot (D4)",
+        "Cut-out wrap: CSS shape-outside from the alpha image; the snapshot records wrap: alpha",
+        "Fonts per paper: licensed families uploaded as woff2; the same family names must be installed on the InDesign machine",
+        "Phase 2: story jumps (continued on page N), baseline grid, Indic hyphenation"
+      ],
+      "interfaces": [
+        "IN wire 5: Articles + template set + ad bookings",
+        "OUT wire 6: PageDoc (D3) · wire 8: LayoutSnapshot (D4)",
+        "POST /v1/editions · POST /v1/editions/:id/autoplan · POST /v1/pages/:id/fit",
+        "renderPage(pageDoc, template) → HTML: the same function in browser and worker"
+      ],
+      "done_when": [
+        "Punjabi sample plans to 2 pages; page 1 fits; page 2 reports its overflow honestly (too much copy)",
+        "The same PageDoc in editor and headless: screenshot difference under 0.5 %",
+        "15 English articles → 4 pages in under 60 s",
+        "Same inputs give the same plan on every run"
+      ]
+    },
+    {
+      "id": "M5",
+      "name": "EDITION EDITOR",
+      "lane": "BUILD PAGES",
+      "status": "PART-BUILT",
+      "needs": "M0 · M4",
+      "purpose": "Where the sub-editor works, phone to desktop.",
+      "tech": "React + TypeScript (Vite) around packages/layout · contenteditable · command-stack undo",
+      "build": [
+        "Port the prototype tools 1:1 first: edit text, width, text columns, headline size, move across pages, photos, add story / page, page sizes",
+        "Load + autosave PageDoc (2 s debounce) with rev; a stale save shows both versions and never overwrites silently",
+        "Unsaved typing is also kept in the browser (IndexedDB). API down? The editor keeps working and saves itself when it returns",
+        "Page lock: one editor per page, live presence, 2 min heartbeat",
+        "Story tray: unplaced articles, tap or drag to place; a source updated badge with merge",
+        "Undo / redo for every tool action; version list with restore",
+        "AI panel (M3): accept or reject options; cut-out toggle on photos (M2)",
+        "Page status: draft → subbed → approved (locked) → exported"
+      ],
+      "interfaces": [
+        "GET /v1/editions/:id · PUT /v1/pages/:id {doc, rev} → 409 on a stale rev",
+        "POST /v1/pages/:id/approve · GET /v1/pages/:id/versions · POST /v1/pages/:id/restore",
+        "Uses M4 renderPage() and the fit meter in the browser; asks /fit for server truth before approve",
+        "Print copy lives in the PageDoc: editing a page never edits the website article"
+      ],
+      "done_when": [
+        "Every prototype action survives a reload",
+        "Two browsers on one page: the second is read-only and sees who holds the lock",
+        "Restore brings back the text, photos and layout of any earlier version",
+        "Usable at 390 px wide: toolbar reachable, zoom works, no lost taps",
+        "Stop the API mid-edit, keep typing, start it again: every word is saved"
+      ]
+    },
+    {
+      "id": "M6",
+      "name": "IDML EXPORT",
+      "lane": "EXPORT",
+      "status": "BUILD NOW",
+      "needs": "M4 · M2",
+      "purpose": "Hands InDesign a page that is 80 % done.",
+      "tech": "packages/idml: JSZip + XML builders · IDML = a zip of XML (designmap, Spreads, Stories, Resources)",
+      "build": [
+        "Skeleton: the client's own template saved as .idml (keeps their styles, masters, swatches, fonts); fallback is our minimal skeleton",
+        "Per page: Spread + Page; one TextFrame each for kicker / head / sub; one multi-column TextFrame per body (TextColumnCount, TextColumnGutter)",
+        "One Stories/Story_*.xml per frame; paragraph style names = feed names (Story-head, Story-body, Side-body …)",
+        "Photos: Rectangle + Image + Link LinkResourceURI=\"file:Links/100.jpg\"; cut-outs get contour text wrap by alpha channel",
+        "Indic styles: Composer=\"HL Composer Optyca\" (World-Ready Paragraph Composer); font family names identical to the CSS",
+        "mm → pt (× 2.8346); spread-origin maths per the IDML spec; zip with mimetype first and uncompressed",
+        "Overflow is exported as overset text, never cut, so the operator sees it"
+      ],
+      "interfaces": [
+        "IN wire 8: LayoutSnapshot + print originals from M2",
+        "OUT wire 9: {paper}_{date}.zip → one .idml with all pages + Links/",
+        "POST /v1/editions/:id/exports {format: \"idml\", pages?} → job → signed URL",
+        "Phase 2: IDML re-import (read back moved frames and edited text)"
+      ],
+      "done_when": [
+        "Opens in the client's InDesign with no repair or missing-plugin dialog",
+        "Frames within 0.5 mm of the browser layout; photos relink when Links/ sits beside the file",
+        "The operator's existing paragraph styles apply untouched; Punjabi and Telugu shape correctly",
+        "CI checks zip layout + well-formed XML on every export; one manual open per new template"
+      ]
+    },
+    {
+      "id": "M7",
+      "name": "PDF + XML EXPORT",
+      "lane": "EXPORT",
+      "status": "PART-BUILT",
+      "needs": "M4",
+      "purpose": "Proofs, papers with no InDesign, and the way back to Typefi.",
+      "tech": "Playwright page.pdf() · qpdf · Ghostscript for CMYK / PDF-X (phase 2)",
+      "build": [
+        "Screen PDF: render the edition HTML with @page = paper size, fonts embedded, RGB — the proof and the e-paper source",
+        "ContentXML: port toCXML(); slot names carry the current spans; round-trip test in CI",
+        "Press PDF (phase 2): Ghostscript → CMYK with a newspaper ICC profile, PDF/X output intent, images to 200 dpi, preflight report",
+        "Per-page and whole-edition files named {paper}_{date}_p{NN}"
+      ],
+      "interfaces": [
+        "IN wire 8: LayoutSnapshot + PageDoc",
+        "OUT wire 12: screen PDF + snapshot → M8",
+        "POST /v1/editions/:id/exports {format: \"pdf_screen\" | \"pdf_press\" | \"cxml\"}",
+        "GET /v1/exports/:id → {status, url, log}"
+      ],
+      "done_when": [
+        "PDF page box equals the chosen size to 0.1 mm; all fonts embedded; text selectable",
+        "ContentXML export of the sample re-parses to the same model (already true in the prototype)",
+        "Press PDF stays labelled experimental until one press trial is signed off"
+      ]
+    },
+    {
+      "id": "M8",
+      "name": "E-PAPER PIPELINE",
+      "lane": "E-PAPER",
+      "status": "BUILD NOW",
+      "needs": "M0",
+      "purpose": "Final PDF in. Tappable edition out.",
+      "tech": "Poppler (pdfinfo pdfseparate pdftoppm pdftotext -bbox-layout) · sharp · Tesseract OCR fallback · Postgres full-text",
+      "build": [
+        "Accept a whole-edition PDF, single-page PDFs, or a LayoutSnapshot (the no-InDesign route). Store the upload first, process it second",
+        "Split → rasterise at 200 dpi → WebP 400 / 1600 / 3200 px wide; keep each page PDF for download",
+        "Text: words with boxes → lines → blocks. Text layer unreadable (legacy Indic fonts)? OCR the page image instead",
+        "Zones: headline candidates (largest type) → fuzzy-match the day's Articles → grow the region by body overlap → rect list + confidence",
+        "Prior: edition built here? Start from the snapshot frames and only verify",
+        "Replace page: reprocess that page only; version + 1, corrected = true; the old version is kept for rollback",
+        "Scheduler publishes at publish_at; cache purge; webhook out"
+      ],
+      "interfaces": [
+        "IN wire 11: final PDF · wire 12: screen PDF + snapshot",
+        "OUT wire 13: ep_pages (images, text) + ep_zones (D5)",
+        "POST /v1/epaper/editions (multipart) · PUT /v1/epaper/editions/:id/pages/:no · PATCH /v1/epaper/pages/:id/zones",
+        "POST /v1/epaper/editions/:id/publish {at} · POST /v1/epaper/editions/:id/rollback"
+      ],
+      "done_when": [
+        "A 24-page PDF is processed in under 2 min on the target box",
+        "At least 85 % of stories auto-zoned on an English edition; every miss is listed for manual fix",
+        "A legacy-font Punjabi PDF still gets zones through OCR or the snapshot prior",
+        "Page replace is live within 60 s; rollback restores the old image and zones"
+      ]
+    },
+    {
+      "id": "M9",
+      "name": "READER",
+      "lane": "E-PAPER",
+      "status": "BUILD NOW",
+      "needs": "M8",
+      "purpose": "The e-paper people actually open.",
+      "tech": "Static TypeScript app (Preact) · service worker · served from a CDN or the paper's own domain",
+      "build": [
+        "Routes /{paper}/{date}/{page}; latest redirect; edition switcher; archive calendar",
+        "Page view: swipe, pinch zoom (swap to the 3200 px image), thumbnail strip",
+        "Zones overlay: tap → story sheet with the Article text and Read on site → Article.url",
+        "Search inside one edition and across the archive; hits highlight their zones",
+        "Share: crop the zone to an image card + link (Web Share, WhatsApp fallback)",
+        "Offline: last opened edition cached; page PDF download"
+      ],
+      "interfaces": [
+        "IN wire 13 through GET /v1/public/papers/:slug/editions?date= · /editions/:id/pages · /pages/:id/zones · /search?q=",
+        "Gate hook from M11 (paywall); event beacons to M11 (analytics)",
+        "Wire 14: back-links to the website"
+      ],
+      "done_when": [
+        "First page visible in under 2 s on 4G; installable as an app",
+        "A zone opens the right story on 20 of 20 sampled taps",
+        "Works at 360 px and 1440 px; Gurmukhi, Telugu and Latin render in the story sheet",
+        "The last edition reopens in airplane mode"
+      ]
+    },
+    {
+      "id": "M10",
+      "name": "SITE KIT (OUT)",
+      "lane": "E-PAPER",
+      "status": "BUILD NOW",
+      "needs": "M8 · M9",
+      "purpose": "Lets any website carry, trust and hear from the e-paper.",
+      "tech": "embed.js (about 5 kB) · signed webhooks · public read API · JWT verify · Caddy on-demand TLS",
+      "build": [
+        "embed.js finds <div data-epaper>, mounts a responsive iframe, uses postMessage for height and deep links",
+        "Custom domain per paper by CNAME with automatic certificates",
+        "Webhooks: edition.published · edition.updated · page.replaced · export.ready; HMAC-SHA256 header; 5 retries with backoff",
+        "SSO: the site issues a short-lived JWT; the reader treats that visitor as a subscriber",
+        "SEO: story landing pages with canonical → site article; a sitemap per paper"
+      ],
+      "interfaces": [
+        "<script src=\"https://HOST/embed.js\" data-paper=\"slug\" data-edition=\"latest\">",
+        "POST {site_hook_url} with X-Epaper-Signature; body {event, paper, edition, page?, url}",
+        "GET /v1/public/* with CORS and cache headers · GET /{paper}/sitemap.xml"
+      ],
+      "done_when": [
+        "One tag shows the latest edition inside a plain HTML page and inside a WordPress post",
+        "The sample receiver verifies the signature; a replayed delivery is rejected",
+        "An expired or forged JWT shows the paywall, never a crash"
+      ]
+    },
+    {
+      "id": "M11",
+      "name": "REVENUE + ANALYTICS",
+      "lane": "E-PAPER",
+      "status": "PHASE 2",
+      "needs": "M9",
+      "purpose": "Money and numbers.",
+      "tech": "Razorpay Subscriptions · events table → daily roll-ups",
+      "build": [
+        "Paywall rules per paper: free pages N, free days, subscriber-only archive",
+        "Razorpay plans, checkout, webhook → subscriptions; grace period on failed renewals",
+        "Ad slots: between pages and banner; source = uploaded creative, booking feed, or ad-server tag",
+        "Events: page_view · zone_open · share · search · dwell; dashboard by page, story, day"
+      ],
+      "interfaces": [
+        "GET /v1/public/entitlement → {access, reason}",
+        "POST /v1/public/events (batched beacons)",
+        "POST /v1/webhooks/razorpay (signature verified)",
+        "Admin: /v1/papers/:id/paywall · /ads · /analytics"
+      ],
+      "done_when": [
+        "A test-mode payment unlocks the reader within 10 s; a cancelled plan locks at period end",
+        "An ad slot shows the booked creative on its dates only",
+        "Dashboard totals equal raw event counts for a sample day"
+      ]
+    },
+    {
+      "id": "M12",
+      "name": "ADMIN CONSOLE",
+      "lane": "ALL LANES",
+      "status": "BUILD NOW",
+      "needs": "all modules",
+      "purpose": "Run many papers from one screen.",
+      "tech": "React (same shell as the editor) · role-gated routes · everything through /v1",
+      "build": [
+        "Papers: name, language, script, page size, timezone, domain, theme",
+        "Sources: add / edit, mapping wizard, TEST, sync log, error inbox",
+        "Templates: grid + slot editor, font upload, client .idml skeleton upload",
+        "Users + roles; audit log viewer",
+        "E-paper desk: drop a PDF → progress → thumbnail grid → replace · hide · reorder · fix zones",
+        "Publish schedule (say 05:00), version list, one-tap rollback",
+        "A status light in the header: green, or a link straight to the ops desk (M13)"
+      ],
+      "interfaces": [
+        "Only the public /v1 API — no private back doors",
+        "Zone fixer writes PATCH /v1/epaper/pages/:id/zones with source: manual",
+        "Saving a template triggers a re-fit preview through M4"
+      ],
+      "done_when": [
+        "New paper to first auto-planned edition in under 15 min using only this console",
+        "A wrong zone is fixed in 3 taps and survives a later page replace when the story is unchanged",
+        "Every destructive action asks once and lands in the audit log"
+      ]
+    },
+    {
+      "id": "M13",
+      "name": "OPS DESK + RECOVERY",
+      "lane": "ALL LANES",
+      "status": "BUILD NOW",
+      "needs": "M0",
+      "purpose": "The owner fixes anything, at any hour, and loses nothing.",
+      "tech": "apps/ops: one small Node service with its own port, login and state file · Docker Engine API · WAL-G (Postgres, to the minute) · restic (files) · any S3 bucket off the box",
+      "build": [
+        "Stands alone: own container, own login (password + TOTP, lock after 5 wrong tries), own state in ops/state.sqlite. It must answer when the API, the worker, Postgres and the proxy are all down",
+        "One row per service from ops/services.yml (D9): api · worker · postgres · proxy · reader · backups · disk · certificate, plus watch-only rows for the bucket, the Claude API and each source",
+        "Each row: a light (green · amber · red), since when, the last error in plain words, Restart, Logs",
+        "Fix buttons, every one safe to press twice: retry failed jobs · pause or resume a queue · re-sync a source · re-process an e-paper page · renew the certificate · free disk space (it lists what it will remove first)",
+        "Releases: every deploy is a tagged image set. Roll back to any of the last 5 in one tap; expand-only migrations keep that safe",
+        "Database: WAL shipped off the box every 60 s, a base backup every night, 30 days kept. Restore to a minute builds a second Postgres beside the live one, shows row counts side by side, then switches. The old one stays for 7 days",
+        "Files: written once, so nothing is ever overwritten. Copied off the box every 15 min with .env and the config; deletes are soft for 30 days. Restore one file, one edition, or everything",
+        "Every destructive button takes a snapshot first and asks for a typed confirmation. Every press lands in the ops log",
+        "Alerts to the owner's phone (Telegram or email) with a link to the fix: failed check · failed backup · disk over 80 % · certificate under 14 days. Plus one uptime monitor outside the box, because a dead box cannot report itself",
+        "A restore drill runs by itself every week into a scratch database; the desk shows backups verified with the date",
+        "scripts/restore.sh: on a fresh Linux box it needs only the recovery kit (bucket keys + backup password) to bring the whole system back"
+      ],
+      "interfaces": [
+        "Front door https://ops.HOST. Back door: the desk's own port :9443, for when the proxy is down",
+        "Ops API (D10): GET /ops/status · POST /ops/services/:name/restart · POST /ops/releases/:tag/rollback · POST /ops/db/restore",
+        "Reads /healthz and /readyz of every service (D9). A new service later is one more entry in ops/services.yml, no desk code",
+        "Promise: crash, restart, bad release or power cut = nothing saved is lost. Dead disk = at most about 1 min of database writes and 15 min of files",
+        "Time back: one service 1 min · a bad release 2 min · the whole box on new hardware 60 min",
+        "Zero loss even on a dead disk comes later: a second server with a synchronous replica"
+      ],
+      "done_when": [
+        "Stop each container in turn: its light is red within 30 s and one tap brings it back",
+        "Drop a table on purpose, then restore to 5 minutes earlier: every row is back, and the newer rows are still in the old copy",
+        "Ship a broken release: rolled back from the desk in under 2 min",
+        "Fill the disk to 95 %: the desk frees space; no original and no backup is touched",
+        "restore.sh on an empty VM: the latest edition opens within 60 min",
+        "With api, worker and Postgres all stopped, the desk still loads and can start them",
+        "The owner fixes a planted fault alone, from a phone, without a terminal"
+      ]
+    }
+  ],
+  "wires": [
+    {
+      "n": 1,
+      "name": "RawItem",
+      "what": "Whatever the source gives: XML node, feed item, JSON, HTML. Pulled on schedule, pushed by webhook, or dropped as a file."
+    },
+    {
+      "n": 2,
+      "name": "Article · D1",
+      "what": "Canonical JSON. Upsert on paper + source + external id; the content hash decides whether it changed."
+    },
+    {
+      "n": 3,
+      "name": "Asset",
+      "what": "Image URLs become asset jobs. Originals and derivatives land in the store."
+    },
+    {
+      "n": 4,
+      "name": "Cut-out",
+      "what": "Photo in → PNG with alpha + subject box out. Browser model first, server worker for batches."
+    },
+    {
+      "n": 5,
+      "name": "Plan input",
+      "what": "The day's Articles, the paper's template set, the booked ad slots."
+    },
+    {
+      "n": 6,
+      "name": "PageDoc · D3",
+      "what": "One JSON per page. The planner writes it; the editor loads and saves it with a revision check."
+    },
+    {
+      "n": 7,
+      "name": "Suggestion",
+      "what": "Options from AI, shown in the editor. Applied only on accept."
+    },
+    {
+      "n": 8,
+      "name": "Layout Snapshot · D4",
+      "what": "Every frame of every approved page in mm, with text, style and asset. The only geometry exporters get."
+    },
+    {
+      "n": 9,
+      "name": "IDML package",
+      "what": "One zip: the .idml plus a Links/ folder of print originals. The operator downloads it."
+    },
+    {
+      "n": 10,
+      "name": "PDF/X",
+      "what": "Made by the client's operator on the client's licence. We never touch press output."
+    },
+    {
+      "n": 11,
+      "name": "Final PDF",
+      "what": "Uploaded whole, or one page at a time for corrections."
+    },
+    {
+      "n": 12,
+      "name": "Screen PDF + zones",
+      "what": "For papers that skip InDesign: our PDF and our snapshot go straight to the pipeline."
+    },
+    {
+      "n": 13,
+      "name": "Edition · D5",
+      "what": "Page images at 400 / 1600 / 3200 px, zones JSON, text index."
+    },
+    {
+      "n": 14,
+      "name": "Site loop",
+      "what": "A tap opens Article.url on the site. embed.js mounts the reader in the site. Webhooks announce editions."
+    }
+  ],
+  "wire_routes": {
+    "1": "sources -> M1",
+    "2": "M1 -> M0",
+    "3": "M1 -> M2 -> M0",
+    "4": "M2 <-> cut-out model",
+    "5": "M0 -> M4",
+    "6": "M0 <-> M5 (M4 and M5 share one renderer)",
+    "7": "M3 -> M5",
+    "8": "M4 -> M6 and M5 -> M7",
+    "9": "M6 -> InDesign",
+    "10": "InDesign -> press",
+    "11": "InDesign -> M8",
+    "12": "M7 -> M8 (skips InDesign)",
+    "13": "M8 -> M9",
+    "14": "readers -> M10 -> the site",
+    "admin": "M12 drives every module through /v1",
+    "ops": "M13 watches every service, ships Postgres + files to the off-box bucket, and restores from it"
+  },
+  "runs": [
+    {
+      "run": "RUN 1 A DAILY EDITION, WITH INDESIGN",
+      "steps": [
+        "wire 1: The site publishes or updates a story",
+        "wire 2 · 3: M1 maps it to an Article; M2 fetches the photos",
+        "wire 5: M4 auto-plans the pages",
+        "wire 6 · 7: The desk edits and approves in M5",
+        "wire 8 · 9: M6 exports the IDML package",
+        "wire 10: The operator polishes and sends PDF/X to press",
+        "wire 11: The same final PDF is uploaded to us",
+        "wire 13: M8 builds the e-paper; it publishes at the set hour",
+        "wire 14: Readers tap through to the site"
+      ]
+    },
+    {
+      "run": "RUN 2 E-PAPER ONLY, NO INDESIGN",
+      "steps": [
+        "wire 1 – 7: Same as run 1, up to page approval",
+        "wire 8: M7 renders the screen PDF from the approved pages",
+        "wire 12: PDF + snapshot go straight to M8; zones come from the snapshot, no guessing",
+        "wire 13: Published at the set hour; readers open it"
+      ]
+    },
+    {
+      "run": "RUN 3 A CORRECTION AFTER PUBLISHING",
+      "steps": [
+        "A mistake is spotted on page 5",
+        "The operator fixes it in InDesign and exports that one page",
+        "wire 11: Admin console: replace page 5",
+        "M8 reprocesses only that page: version + 1, marked corrected",
+        "wire 14: Webhook page.replaced fires; readers see it on refresh",
+        "Wrong fix? Roll back in one tap"
+      ]
+    },
+    {
+      "run": "RUN 4 SOMETHING BREAKS AT 2 AM",
+      "steps": [
+        "A health check fails. The owner's phone gets an alert with a link",
+        "M13: The ops desk shows which service is red, since when, and its last error in plain words",
+        "M13: One tap: restart it, retry the failed jobs, or roll back the release",
+        "M13: Data damaged? Restore to the minute before, beside the live database, compare, then switch",
+        "M5: Meanwhile the editors' typing waits in the browser and saves itself when the API returns",
+        "M13: All lights green. Every press is in the ops log"
+      ]
+    }
+  ],
+  "integration": {
+    "doors_in": [
+      {
+        "n": 1,
+        "door": "PUSH API",
+        "use_when": "Best door. The site or a CMS plugin POSTs each publish and update to /v1/ingest/articles.",
+        "site_gives": "One HTTP call. We issue the API key and HMAC secret.",
+        "fresh_in": "Seconds"
+      },
+      {
+        "n": 2,
+        "door": "FEED PULL",
+        "use_when": "The site already publishes RSS, Atom, JSON Feed or a news sitemap.",
+        "site_gives": "The feed URL.",
+        "fresh_in": "2–15 min polls, ETag aware"
+      },
+      {
+        "n": 3,
+        "door": "CMS API",
+        "use_when": "WordPress REST (/wp-json/wp/v2/posts?_embed), Ghost, Drupal JSON:API, Strapi, or any REST / GraphQL endpoint.",
+        "site_gives": "Base URL. A read token if the API is private.",
+        "fresh_in": "Polls for changed posts only"
+      },
+      {
+        "n": 4,
+        "door": "FILE DROP",
+        "use_when": "The CMS exports files: Typefi ContentXML (BlinkCMS), NewsML-G2, NITF, DOCX.",
+        "site_gives": "Upload, SFTP or a bucket folder.",
+        "fresh_in": "On arrival"
+      },
+      {
+        "n": 5,
+        "door": "HTML PAGES",
+        "use_when": "No feed and no API. We read article pages with CSS selectors, else JSON-LD NewsArticle + OpenGraph + Readability.",
+        "site_gives": "Section URLs. Only sites the paper owns or has rights to. robots.txt is honoured.",
+        "fresh_in": "5–30 min polls"
+      }
+    ],
+    "mapping": {
+      "principle": "Each source row stores mapping_json: canonical field ← path + transforms. JSONPath for JSON, XPath for XML, CSS selectors for HTML, jsonld: for schema.org data.",
+      "transforms": [
+        "strip_html",
+        "html_to_blocks",
+        "split_paragraphs",
+        "parse_date(tz)",
+        "absolutize(base)",
+        "prefix()",
+        "regex()",
+        "map(table)"
+      ],
+      "wizard_order": [
+        "/wp-json found → WordPress door",
+        "RSS / Atom autodiscovery link → feed door",
+        "JSON-LD NewsArticle on the page",
+        "OpenGraph + meta tags",
+        "Readability on the raw HTML"
+      ],
+      "test": "Then TEST shows 5 parsed articles and every validation error before anything is saved.",
+      "layout_hints": "Layout hints ride along: ContentXML slot names such as story_col_span-3-1, sidebar, feature-1 become layout_hint. Sources without hints are auto-placed by M4."
+    },
+    "doors_out": [
+      {
+        "n": 1,
+        "door": "EMBED",
+        "what": "One script tag or iframe shows the reader inside any page. Or a CNAME: epaper.yoursite.com."
+      },
+      {
+        "n": 2,
+        "door": "BACK-LINKS",
+        "what": "Every tap zone carries Article.url. Readers land on the site's own article page; canonical tags point home."
+      },
+      {
+        "n": 3,
+        "door": "WEBHOOKS",
+        "what": "edition.published edition.updated page.replaced export.ready — HMAC signed, retried with backoff."
+      },
+      {
+        "n": 4,
+        "door": "READ API",
+        "what": "Editions, pages, zones and search as JSON with CORS. Enough to build a custom front end."
+      },
+      {
+        "n": 5,
+        "door": "SSO",
+        "what": "The site signs a short-lived JWT; the reader treats that visitor as a subscriber."
+      }
+    ],
+    "onboard_new_site": [
+      "Create paper: name · language · page size",
+      "Add source: pick a door",
+      "Run wizard: press TEST, fix the mapping",
+      "Map sections: site section → paper page",
+      "Pick templates: or upload the client .idml",
+      "Auto-plan: today's edition appears"
+    ],
+    "new_source_kind": "New source kind? One adapter file implementing Connector (about 100 lines) plus tests. Nothing else changes."
+  },
+  "contracts": {
+    "D1_ARTICLE": {
+      "about": "the one shape every source becomes",
+      "example": "{\n  \"id\": \"art_01JD…\",                    // ours\n  \"paper_id\": \"pap_…\",  \"source_id\": \"src_…\",\n  \"external_id\": \"wp:48213\",             // theirs, stable\n  \"url\": \"https://site.com/news/slug\",   // tap target, wire 14\n  \"lang\": \"pa\",  \"script\": \"Guru\",\n  \"section\": \"world\",  \"tags\": [\"canada\"],\n  \"priority\": 70,                        // 0-100, source or editor\n  \"kicker\": null,\n  \"headline\": \"…\",\n  \"subhead\": \"…\",\n  \"byline\": \"…\",  \"dateline\": \"Montreal, 2 Apr\",\n  \"body\": [ {\"t\": \"p\", \"text\": \"…\"},\n            {\"t\": \"h\", \"text\": \"…\"},\n            {\"t\": \"quote\", \"text\": \"…\"} ],\n  \"images\": [ {\"asset_id\": \"ast_…\", \"role\": \"lead\",\n               \"src\": \"https://site.com/img/100.jpg\",\n               \"caption\": \"…\", \"credit\": \"…\"} ],\n  \"layout_hint\": {\"page\": \"Main\", \"slot\": \"story_col_span-3-1\",\n                  \"span\": 3, \"order\": 1},     // optional\n  \"published_at\": \"2026-04-02T10:15:00-04:00\",\n  \"updated_at\": \"2026-04-02T11:02:00-04:00\",\n  \"content_hash\": \"sha256:…\",  \"rev\": 3\n}"
+    },
+    "D2_CONNECTOR_AND_MAPPING": {
+      "about": "how a site is described, in data",
+      "example": "// packages/connectors: one file per kind\nexport interface Connector<C> {\n  kind: string;                 // \"rss\" | \"wordpress\" | \"cxml\" …\n  configSchema: ZodType<C>;\n  discover(cfg: C, since: Date): AsyncIterable<Ref>;\n  fetch(cfg: C, ref: Ref): Promise<RawItem>;\n}\ntype RawItem = { ref: Ref; format: \"json\" | \"xml\" | \"html\";\n                 data: unknown; fetchedAt: string };\nnormalize(raw: RawItem, mapping: Mapping): Article  // then zod\n\n// PUSH door\nPOST /v1/ingest/articles\nX-Api-Key: <source key>    X-Signature: sha256=<hmac of body>\nbody: an Article without our ids, or {\"raw\": …} to run the mapping\n\n// sources row for a WordPress site: config + mapping\n{ \"kind\": \"wordpress\",\n  \"config\": { \"base\": \"https://site.com\", \"poll\": \"*/5 * * * *\" },\n  \"mapping\": {\n    \"external_id\":   \"$.id | prefix('wp:')\",\n    \"url\":           \"$.link\",\n    \"headline\":      \"$.title.rendered | strip_html\",\n    \"subhead\":       \"$.excerpt.rendered | strip_html\",\n    \"body\":          \"$.content.rendered | html_to_blocks\",\n    \"section\":       \"$._embedded['wp:term'][0][0].slug | map(sections)\",\n    \"images[0].src\": \"$._embedded['wp:featuredmedia'][0].source_url\",\n    \"published_at\":  \"$.date_gmt | parse_date('UTC')\" } }\n\n// a site with no feed and no API\n{ \"kind\": \"scrape\",\n  \"config\": { \"list\": [\"https://site.com/world/\"],\n              \"link_selector\": \"article a.title\",\n              \"obey_robots\": true },\n  \"mapping\": {\n    \"headline\":      \"css:h1.entry-title\",\n    \"body\":          \"css:div.entry-content p | blocks\",\n    \"images[0].src\": \"css:meta[property='og:image']@content\",\n    \"published_at\":  \"jsonld:datePublished\" } }\n\n// Typefi ContentXML needs no mapping: kind \"cxml\" is built in"
+    },
+    "D3_PAGEDOC": {
+      "about": "one page as the editor saves it",
+      "example": "{ \"page\": { \"no\": 1, \"size\": \"broadsheet\", \"w_mm\": 381, \"h_mm\": 578,\n            \"template\": \"front_a\", \"body_pt\": 8.7 },\n  \"furniture\": { \"masthead\": \"…\", \"tagline\": \"…\",\n                 \"strip\": [\"…\", \"…\", \"…\"] },\n  \"items\": [\n    { \"id\": \"it_1\", \"kind\": \"story\",     // story|side|feature|edit|ad\n      \"article_id\": \"art_…\", \"article_rev\": 3,\n      \"slot\": \"story_col_span-3-1\", \"span\": 3, \"cols\": 3, \"hs\": 1.0,\n      \"text\": { \"kicker\": null, \"head\": \"…\", \"sub\": \"…\",\n                \"body\": [\"…\", \"…\"] },    // print copy, not web copy\n      \"image\": { \"asset_id\": \"ast_…\", \"ratio\": 1.78,\n                 \"cutout\": false, \"focal\": [0.5, 0.4] },\n      \"styles\": { \"head\": \"Story-head\", \"sub\": \"Story-sub-head\",\n                  \"body\": \"Story-body\" } }\n  ],\n  \"status\": \"draft\",  \"rev\": 12 }"
+    },
+    "D4_LAYOUT_SNAPSHOT": {
+      "about": "what every exporter reads",
+      "example": "{ \"edition_id\": \"ed_…\", \"unit\": \"mm\", \"origin\": \"page top-left\",\n  \"pages\": [ { \"no\": 1, \"w\": 381, \"h\": 578, \"fill_pct\": 98,\n    \"frames\": [\n      { \"id\": \"it_1.head\", \"item\": \"it_1\", \"role\": \"head\",\n        \"x\": 8.5, \"y\": 62.1, \"w\": 136.4, \"h\": 21.0,\n        \"style\": \"Story-head\", \"font\": \"…\", \"size_pt\": 27.5,\n        \"text\": \"…\" },\n      { \"id\": \"it_1.img\", \"item\": \"it_1\", \"role\": \"image\",\n        \"x\": 8.5, \"y\": 86.0, \"w\": 136.4, \"h\": 76.6,\n        \"asset_id\": \"ast_…\", \"file\": \"100.jpg\",\n        \"crop\": [0, 0.1, 1, 0.8], \"wrap\": \"none\" },  // or \"alpha\"\n      { \"id\": \"it_1.body\", \"item\": \"it_1\", \"role\": \"body\",\n        \"x\": 8.5, \"y\": 166.0, \"w\": 136.4, \"h\": 96.2,\n        \"cols\": 3, \"gutter\": 5.0, \"style\": \"Story-body\",\n        \"size_pt\": 8.7, \"paras\": [\"…\", \"…\"], \"overset\": false }\n    ] } ] }\n// roles: masthead | strip | kicker | head | sub | body | image | ad"
+    },
+    "D5_ZONES": {
+      "about": "tap areas on an e-paper page",
+      "example": "{ \"page\": 1, \"image\": { \"w\": 3200, \"h\": 4855 }, \"version\": 2,\n  \"zones\": [\n    { \"id\": \"z_1\", \"article_id\": \"art_…\",      // null for ads\n      \"title\": \"…\", \"url\": \"https://site.com/news/slug\",\n      \"rects\": [[0.022, 0.107, 0.358, 0.330]],  // x, y, w, h as 0-1\n      \"confidence\": 0.93, \"source\": \"auto\" }    // auto | snapshot | manual\n  ] }"
+    },
+    "D6_HOOKS_AND_EMBED": {
+      "about": "what the website sees",
+      "example": "// webhook we send to the site\nPOST https://site.com/hooks/epaper\nX-Epaper-Signature: sha256=<hmac of body>\nX-Epaper-Delivery: <uuid>              // reject repeats\n{ \"event\": \"edition.published\", \"paper\": \"slug\",\n  \"edition\": \"2026-11-18\", \"pages\": 16,\n  \"url\": \"https://epaper.site.com/2026-11-18/1\" }\n\n// reader inside any page\n<div data-epaper></div>\n<script src=\"https://HOST/embed.js\"\n        data-paper=\"slug\" data-edition=\"latest\"></script>\n\n// subscriber hand-off: site signs, reader verifies\nhttps://epaper.site.com/latest?token=<JWT, 5 min, {sub, plan}>\n\n// the site's receiver, in any language\nvalid = hmac_sha256(secret, raw_body) == signature\n        and delivery_id not seen before"
+    },
+    "D7_REPO_LAYOUT": {
+      "about": "where every module lives",
+      "example": "epaper-desk/\n  apps/\n    api/            // Fastify /v1 routes, auth, OpenAPI           M0\n    worker/         // queue processors, one folder per queue      M0\n    ops/            // ops desk: lights, fixes, restore            M13\n    editor/         // React edition editor                        M5\n    admin/          // React admin console                         M12\n    reader/         // Preact PWA + embed.js                       M9 M10\n  packages/\n    core/           // zod contracts D1–D5 + D9, ids, errors       M0\n    connectors/     // one adapter per kind + mapping engine       M1\n    assets/         // derivatives, focal point, cut-out           M2\n    ai/             // suggestion tasks + validators               M3\n    layout/         // templates, renderPage, fit, snapshot        M4\n    idml/           // snapshot → IDML package                     M6\n    export/         // screen PDF, press PDF, ContentXML           M7\n    epaper/         // PDF → images, text, zones                   M8\n  prisma/           // schema, expand-only migrations, seed        M0\n  ops/              // services.yml · alert rules · desk state     M13\n  scripts/          // restore.sh · backup-check.sh · deploy.sh    M13\n  fixtures/         // blinkcms-poc.cxml · english-15.json · edition-24p.pdf\n  templates/        // default broadsheet + tabloid sets, fonts\n  STATUS.md         // build clock + hourly log, shown on the ops desk\n  CLAUDE.md         // standing rules for the build agent\n  docker-compose.yml   // api worker ops postgres proxy backup"
+    },
+    "D9_HEALTH_AND_SERVICE_LIST": {
+      "about": "how the desk knows a service",
+      "example": "// every service we run answers these two\nGET /healthz   → 200 {\"ok\": true}                      // the process is alive\nGET /readyz    → 200 {\"ok\": true,  \"checks\": {\"db\": \"ok\", \"files\": \"ok\"}}\n               → 503 {\"ok\": false, \"checks\": {\"db\": \"timeout after 5 s\"}}\n\n// ops/services.yml: one entry = one row on the desk\n- name: worker\n  container: epaper-worker\n  ready: http://worker:3001/readyz\n  needs: [postgres, files]             # red here? fix those first\n  fixes: [restart, logs, retry_jobs]\n- name: postgres\n  container: epaper-postgres\n  ready: pg_isready\n  fixes: [restart, logs, restore_to_minute]\n- name: backups\n  ready: wal_age_s < 180 and files_age_min < 30\n  fixes: [run_now, verify_now]\n- name: claude-api                     # outside link: watch only\n  ready: https://api.anthropic.com\n  fixes: []\n\n# a new service later = one more entry here, no desk code"
+    },
+    "D10_OPS_DESK_API": {
+      "about": "every button is a route",
+      "example": "// apps/ops: own port, own login, no need for the API or Postgres\nGET  /ops/status\n{ \"release\": \"2026-11-21.3\",\n  \"services\": [ { \"name\": \"worker\", \"state\": \"red\", \"since\": \"02:04\",\n                  \"last_error\": \"cannot reach postgres:5432\",\n                  \"fixes\": [\"restart\", \"logs\", \"retry_jobs\"] } ],\n  \"backups\": { \"db_wal_age_s\": 41, \"files_age_min\": 9,\n               \"last_drill\": \"2026-11-20 pass\" },\n  \"disk\": { \"used_pct\": 63 },  \"cert_days_left\": 71 }\n\nPOST /ops/services/:name/restart       // safe to press twice\nGET  /ops/services/:name/logs?tail=200\nPOST /ops/jobs/retry                   {queue?, ids?}\nPOST /ops/queues/:name/pause           // and /resume\nPOST /ops/releases/:tag/rollback       // any of the last 5 tags\nPOST /ops/backups/run                  // and /verify\nPOST /ops/db/restore                   {to: \"2026-11-21T01:58:00+05:30\"}\nPOST /ops/db/restore/:id/switch        // after the counts are compared\nPOST /ops/files/restore                {scope: \"file\" | \"edition\" | \"all\", at}\nGET  /ops/log                          // who pressed what, and when\nGET  /ops/build                        // STATUS.md: the build clock\n// a destructive POST snapshots first, then writes one ops-log line"
+    }
+  },
+  "contract_rules": [
+    "Schemas live in packages/core as zod. TypeScript types are inferred from them, never written twice.",
+    "Add fields freely. Never rename or re-type one: a breaking change is a new contract version.",
+    "Fixtures are the tests' truth: fixtures/blinkcms-poc.cxml · fixtures/english-15.json · fixtures/edition-24p.pdf.",
+    "Ids are prefixed strings (pap_ src_ art_ ast_ ed_ it_ z_) so logs read themselves.",
+    "Times are ISO 8601 with offset. Geometry is mm on pages and 0–1 fractions on e-paper images."
+  ],
+  "api": {
+    "INGEST + CONTENT": [
+      {
+        "route": "POST /v1/ingest/articles",
+        "note": "push door: API key + HMAC"
+      },
+      {
+        "route": "POST /v1/sources",
+        "note": "{kind, config, mapping}"
+      },
+      {
+        "route": "POST /v1/sources/:id/test",
+        "note": "dry run → 5 parsed articles"
+      },
+      {
+        "route": "POST /v1/sources/:id/sync",
+        "note": "pull now"
+      },
+      {
+        "route": "GET /v1/articles?date=&section=",
+        "note": "the day's stories"
+      },
+      {
+        "route": "PATCH /v1/articles/:id",
+        "note": "priority, section"
+      },
+      {
+        "route": "POST /v1/assets",
+        "note": "upload an image"
+      },
+      {
+        "route": "POST /v1/assets/:id/cutout",
+        "note": "background removed"
+      },
+      {
+        "route": "POST /v1/ai/suggest",
+        "note": "copy-fit options"
+      }
+    ],
+    "EDITIONS + EXPORT": [
+      {
+        "route": "POST /v1/editions",
+        "note": "{paper, date, template_set}"
+      },
+      {
+        "route": "POST /v1/editions/:id/autoplan",
+        "note": "plan + fit all pages"
+      },
+      {
+        "route": "GET /v1/editions/:id",
+        "note": "edition with its PageDocs"
+      },
+      {
+        "route": "PUT /v1/pages/:id",
+        "note": "{doc, rev} → 409 if stale"
+      },
+      {
+        "route": "POST /v1/pages/:id/fit",
+        "note": "server fit report"
+      },
+      {
+        "route": "POST /v1/pages/:id/approve",
+        "note": "lock the page"
+      },
+      {
+        "route": "GET /v1/pages/:id/versions",
+        "note": "history"
+      },
+      {
+        "route": "POST /v1/pages/:id/restore",
+        "note": "{rev}"
+      },
+      {
+        "route": "POST /v1/editions/:id/exports",
+        "note": "idml | pdf_* | cxml → job"
+      },
+      {
+        "route": "GET /v1/exports/:id",
+        "note": "{status, url, log}"
+      }
+    ],
+    "E-PAPER + PUBLIC": [
+      {
+        "route": "POST /v1/epaper/editions",
+        "note": "PDF upload or {edition_id}"
+      },
+      {
+        "route": "PUT /v1/epaper/editions/:id/pages/:no",
+        "note": "replace one page"
+      },
+      {
+        "route": "PATCH /v1/epaper/pages/:id/zones",
+        "note": "manual zone fix"
+      },
+      {
+        "route": "POST /v1/epaper/editions/:id/publish",
+        "note": "{at}"
+      },
+      {
+        "route": "POST /v1/epaper/editions/:id/rollback",
+        "note": "previous version"
+      },
+      {
+        "route": "GET /v1/public/papers/:slug/editions",
+        "note": "?date="
+      },
+      {
+        "route": "GET /v1/public/editions/:id/pages",
+        "note": "images + sizes"
+      },
+      {
+        "route": "GET /v1/public/pages/:id/zones",
+        "note": "contract D5"
+      },
+      {
+        "route": "GET /v1/public/search",
+        "note": "?q= &paper= &from= &to="
+      },
+      {
+        "route": "POST /v1/public/events",
+        "note": "analytics beacons"
+      }
+    ]
+  },
+  "data_model": {
+    "groups": [
+      {
+        "group": "WHO + OPS",
+        "about": "Tenancy, access, and the paper trail.",
+        "tables": {
+          "papers": [
+            "id",
+            "slug",
+            "name",
+            "lang",
+            "script",
+            "page_w_mm",
+            "page_h_mm",
+            "tz",
+            "domain",
+            "theme"
+          ],
+          "users": [
+            "id",
+            "email",
+            "pw_hash",
+            "name"
+          ],
+          "memberships": [
+            "user_id",
+            "paper_id",
+            "role"
+          ],
+          "api_keys": [
+            "id",
+            "paper_id",
+            "source_id",
+            "key_hash",
+            "last_used_at"
+          ],
+          "jobs": [
+            "id",
+            "paper_id",
+            "type",
+            "idempotency_key",
+            "status",
+            "tries",
+            "log"
+          ],
+          "audit_log": [
+            "id",
+            "paper_id",
+            "user_id",
+            "action",
+            "entity",
+            "before",
+            "after",
+            "at"
+          ]
+        }
+      },
+      {
+        "group": "CONTENT",
+        "about": "What came in from the websites.",
+        "tables": {
+          "sources": [
+            "id",
+            "paper_id",
+            "kind",
+            "config",
+            "mapping",
+            "schedule",
+            "last_sync_at",
+            "status"
+          ],
+          "articles": [
+            "id",
+            "paper_id",
+            "source_id",
+            "external_id",
+            "url",
+            "lang",
+            "headline",
+            "subhead",
+            "body",
+            "section",
+            "priority",
+            "layout_hint",
+            "content_hash",
+            "rev"
+          ],
+          "assets": [
+            "id",
+            "paper_id",
+            "article_id",
+            "parent_id",
+            "kind",
+            "orig_key",
+            "w",
+            "h",
+            "focal",
+            "derivatives",
+            "caption",
+            "credit",
+            "hash"
+          ],
+          "ai_suggestions": [
+            "id",
+            "paper_id",
+            "article_id",
+            "task",
+            "constraints",
+            "output",
+            "model",
+            "accepted_by",
+            "at"
+          ],
+          "templates": [
+            "id",
+            "paper_id",
+            "name",
+            "page_kind",
+            "grid_cols",
+            "slots",
+            "css",
+            "fonts",
+            "idml_skeleton_key"
+          ]
+        }
+      },
+      {
+        "group": "PAGES",
+        "about": "What the desk made of it.",
+        "tables": {
+          "editions": [
+            "id",
+            "paper_id",
+            "date",
+            "name",
+            "status",
+            "rev"
+          ],
+          "pages": [
+            "id",
+            "edition_id",
+            "no",
+            "template_id",
+            "doc",
+            "fit_pct",
+            "status",
+            "locked_by",
+            "rev"
+          ],
+          "page_versions": [
+            "id",
+            "page_id",
+            "rev",
+            "doc",
+            "user_id",
+            "at"
+          ],
+          "page_articles": [
+            "page_id",
+            "article_id",
+            "article_rev"
+          ],
+          "exports": [
+            "id",
+            "edition_id",
+            "format",
+            "status",
+            "file_key",
+            "snapshot_key",
+            "log",
+            "created_by"
+          ]
+        }
+      },
+      {
+        "group": "E-PAPER",
+        "about": "What readers open.",
+        "tables": {
+          "ep_editions": [
+            "id",
+            "paper_id",
+            "date",
+            "source",
+            "status",
+            "publish_at",
+            "version"
+          ],
+          "ep_pages": [
+            "id",
+            "ep_edition_id",
+            "no",
+            "pdf_key",
+            "img_keys",
+            "text",
+            "version",
+            "corrected"
+          ],
+          "ep_zones": [
+            "id",
+            "ep_page_id",
+            "article_id",
+            "rects",
+            "title",
+            "url",
+            "confidence",
+            "source"
+          ],
+          "readers": [
+            "id",
+            "paper_id",
+            "email",
+            "phone",
+            "sso_sub",
+            "created_at"
+          ],
+          "subscriptions": [
+            "id",
+            "paper_id",
+            "reader_id",
+            "plan",
+            "status",
+            "period_end"
+          ],
+          "events": [
+            "id",
+            "paper_id",
+            "type",
+            "ep_page_id",
+            "zone_id",
+            "reader_id",
+            "at"
+          ]
+        }
+      }
+    ],
+    "one_to_many": [
+      "users -> memberships",
+      "sources -> articles",
+      "articles -> assets",
+      "editions -> pages",
+      "pages -> page_versions",
+      "ep_editions -> ep_pages",
+      "ep_pages -> ep_zones",
+      "readers -> subscriptions"
+    ],
+    "notes": [
+      "pages.doc (a PageDoc) is the truth for a page. page_articles is only an index answering: where is this article used?",
+      "ep_zones.article_id may be null: an advert or an unmatched story still gets a zone, fixed by hand later.",
+      "assets.parent_id links a cut-out to its photo. The print file is always the untouched original.",
+      "The job queue is tables too (pgboss schema), so one database backup covers rows and queued work. The ops desk keeps its own small state outside Postgres, on purpose."
+    ]
+  },
+  "build_order": {
+    "step_0": [
+      "D1–D5 + D9 as zod schemas in packages/core",
+      "Fixtures: blinkcms-poc.cxml · english-15.json · edition-24p.pdf",
+      "M0 skeleton: compose file, migrations, auth, queue, files",
+      "M13 safety net: ops desk up, backups leaving the box, one restore drill passed",
+      "Nothing else starts before this is merged"
+    ],
+    "tracks": [
+      {
+        "track": "TRACK A CONTENT IN",
+        "steps": [
+          "M1: ContentXML + RSS connectors (check: Punjabi sample lands as 9 stories)",
+          "M1: WordPress, HTML and push doors + mapping wizard (check: an unseen site maps with no code)",
+          "M2: assets, focal point, cut-outs (check: a cut-out comes back in 10 s)"
+        ]
+      },
+      {
+        "track": "TRACK B PAGES",
+        "steps": [
+          "M4: port layout + templates (check: prototype pages re-render)",
+          "M4: snapshot, auto-plan, fit loop (check: 4 pages in 60 s)",
+          "M5: port editor, save, versions, locks (check: edits survive a reload)",
+          "M7: screen PDF + ContentXML (check: XML round-trips)",
+          "M6: IDML export (check: opens clean in InDesign)"
+        ]
+      },
+      {
+        "track": "TRACK C E-PAPER",
+        "steps": [
+          "M8: PDF → images, text, zones on the fixture PDF (check: 85 % of stories zoned)",
+          "M9: reader: zoom, zones, search, offline (check: the right story on every tap)",
+          "M10: embed.js, webhooks, read API (check: one tag shows the edition)"
+        ]
+      }
+    ],
+    "join": [
+      "Wire the tracks end to end on the English demo: wires 1–9, then 12 → 13 → 14.",
+      "Then load the Punjabi feed through the same engine.",
+      "Then M3 AI assist, cut-outs in the editor, M12 console screens."
+    ],
+    "join_goal": "DEMO-READY = all 8 beats run with no terminal in sight",
+    "later": [
+      "M11 revenue + analytics",
+      "Press PDF (CMYK, PDF/X)",
+      "IDML re-import",
+      "Story jumps",
+      "Indic hyphenation",
+      "Baseline grid",
+      "Ghost, Drupal, NewsML adapters",
+      "Multi-city editions",
+      "A second server: zero loss on a dead disk"
+    ],
+    "done_rule": "A module is finished only when its DONE WHEN list passes — as automated tests wherever a test can check it."
+  },
+  "clock_72h": {
+    "starts": "when the owner writes 'build' in the build session",
+    "note": "The clock starts when the owner writes build in the build session. STATUS.md records the start, the deadline and one entry every hour; the ops desk shows it. A missing input never stops the build: it is stubbed, listed under WAITING ON OWNER, and is not counted as a miss.",
+    "pause_risk": "A usage cap or a closed session can pause the agent. The next session reads STATUS.md and carries on. Paused hours still count, so the cut order protects the deadline.",
+    "blocks": [
+      {
+        "hours": "0-8",
+        "name": "FLOOR + SAFETY NET",
+        "modules": "M0 · M13",
+        "work": [
+          "Contracts frozen as zod",
+          "The stack runs on the server",
+          "Ops desk v1: lights, restart, logs",
+          "Backups leaving the box"
+        ],
+        "exit_check": "the first restore drill passes"
+      },
+      {
+        "hours": "8-32",
+        "name": "THREE TRACKS",
+        "modules": "M1 M2 · M4 M5 M6 M7 · M8 M9 M10",
+        "work": [
+          "Track A: content in",
+          "Track B: pages + exports",
+          "Track C: e-paper + site kit",
+          "Side by side; merge small, merge often"
+        ],
+        "exit_check": "every track check is green"
+      },
+      {
+        "hours": "32-44",
+        "name": "JOIN",
+        "modules": "wires 1 → 14",
+        "work": [
+          "The English demo, end to end",
+          "The Punjabi ContentXML through the same engine",
+          "No terminal anywhere on the path"
+        ],
+        "exit_check": "beats 1, 2, 5, 6, 7 and 8 run"
+      },
+      {
+        "hours": "44-54",
+        "name": "ASSIST + CONSOLE",
+        "modules": "M3 · M12 · M13",
+        "work": [
+          "AI copy-fit panel",
+          "Cut-outs inside the editor",
+          "Admin console screens",
+          "Ops desk: rollback, restore, alerts"
+        ],
+        "exit_check": "all 8 beats run"
+      },
+      {
+        "hours": "54-64",
+        "name": "BREAK-IT DRILLS",
+        "modules": "every DONE WHEN list",
+        "work": [
+          "Kill each service; fix it from the desk",
+          "Damage data; restore to the minute",
+          "Ship a bad release; roll it back",
+          "Full disk · expired certificate · dead source"
+        ],
+        "exit_check": "every drill fixed, nothing lost"
+      },
+      {
+        "hours": "64-72",
+        "name": "REHEARSAL + HAND-OVER",
+        "modules": "the demo",
+        "work": [
+          "The 8 beats, twice: phone and laptop",
+          "restore.sh on an empty box",
+          "Runbook + recovery kit list",
+          "Release tagged, STATUS.md closed"
+        ],
+        "exit_check": "the owner fixes a planted fault alone"
+      }
+    ],
+    "finished_means": [
+      "Every BUILD NOW and PART-BUILT module passes its DONE WHEN list",
+      "The 8 demo beats run with no terminal in sight",
+      "Every break-it drill is fixed from the ops desk with nothing lost",
+      "The owner fixes a planted fault alone, from a phone"
+    ],
+    "preflight_owner": [
+      "A Linux server: 4 vCPU · 16 GB · 200 GB disk, with SSH access for the build agent",
+      "A domain with DNS access: app. ops. epaper. point at the server",
+      "An S3 bucket off the box, with another provider, and its keys",
+      "An empty private Git repo the agent can push to",
+      "A Claude API key for M3 · a Telegram bot token or an email login for alerts",
+      "Fixtures: the BlinkCMS .cxml · one real edition PDF · the English demo site URL",
+      "The Card Maker cut-out code (SEG) for M2",
+      "Three files in the repo root: this blueprint · the prototype .html · CLAUDE.md",
+      "A password manager entry for the recovery kit. Lose it and the backups cannot be read"
+    ],
+    "cut_order_if_late": [
+      "SSO token, story landing pages, sitemap (M10 extras)",
+      "Archive-wide search. Search inside one edition stays",
+      "Template slot-editor screen. Templates stay as files",
+      "OCR fallback. Text layer + snapshot prior stay",
+      "Server cut-out worker. The browser cut-out stays"
+    ],
+    "never_cut": "Never cut: the contracts · the M13 safety net · the restore drill · the 8 demo beats.",
+    "outside_the_clock": [
+      "InDesign open-test with the client's own template, fonts and operator",
+      "A press PDF trial run at the client's press",
+      "Tuning the templates to the client's real pages over live nights",
+      "M11 revenue + analytics · IDML re-import · story jumps",
+      "A second server, for zero loss on a dead disk"
+    ]
+  },
+  "demo_path": [
+    "Paste the site URL. The wizard maps it. Articles land.",
+    "Auto-plan: four English pages in about a minute.",
+    "Edit a headline live. AI offers three shorter ones.",
+    "Swap the lead photo. Cut it out. Text wraps around it.",
+    "Export IDML. It opens in InDesign with their styles.",
+    "Export PDF. The e-paper builds. Open it on a phone.",
+    "Tap a story. The site's own article opens.",
+    "Load their Punjabi ContentXML. Same engine, their language."
+  ],
+  "needs": {
+    "from_client": [
+      "Five recent print PDFs of the paper",
+      "Their InDesign page template saved as .idml, plus the fonts",
+      "Image files, or the base URL, for feed refs such as 100.jpg",
+      "Page size, column grid, and the section → page plan",
+      "Ad slot rules and who books them",
+      "The domain for the e-paper (a CNAME)",
+      "One InDesign operator for an hour of open-tests",
+      "The chief sub-editor who signs pages off"
+    ],
+    "from_us": [
+      "Confirm the cut-out module to reuse: Card Maker's browser model",
+      "Demo content: the client's own site, or content we hold rights to"
+    ]
+  },
+  "risks": [
+    {
+      "risk": "The operator ignores the browser and starts fresh in InDesign",
+      "answer": "IDML must open clean with their styles. Track the share of frames left untouched."
+    },
+    {
+      "risk": "Indic PDF text is unreadable (legacy fonts)",
+      "answer": "OCR, the snapshot prior, and the zone fixer."
+    },
+    {
+      "risk": "Auto layout is not hand craft",
+      "answer": "Templates copied from their paper, approval per page, overset never hidden."
+    },
+    {
+      "risk": "Browser justification is weaker; no Indic hyphenation yet",
+      "answer": "Print truth stays in InDesign. Hyphenation is phase 2."
+    },
+    {
+      "risk": "Two copies of the text: web and print",
+      "answer": "article_rev on every item and a source-updated badge."
+    },
+    {
+      "risk": "Licences",
+      "answer": "Fonts come from the client. Ghostscript is AGPL: unmodified CLI or a paid licence. Scrape only owned or permitted sites."
+    },
+    {
+      "risk": "Press colour",
+      "answer": "Press PDF stays experimental until one trial run is signed off."
+    },
+    {
+      "risk": "Something breaks at night and nobody technical is awake",
+      "answer": "M13: alert → ops desk → one tap. Drilled before hand-over, and the owner passes the last drill alone."
+    },
+    {
+      "risk": "The whole server dies, and the ops desk with it",
+      "answer": "Off-box backups + restore.sh on a new box in about an hour. Losing nothing at all needs a second server."
+    }
+  ],
+  "not_building": [
+    "PDF editing",
+    "InDesign Server",
+    "our own typesetting engine",
+    "a second layout renderer",
+    "Redis",
+    "MinIO"
+  ],
+  "prototype": {
+    "name": "E-Paper Desk (single HTML file)",
+    "port": [
+      "parseCXML",
+      "toCXML",
+      "row packer",
+      "fit meter + auto-fit text",
+      "story tools",
+      "low-res photo warning",
+      "e-paper view"
+    ]
+  }
+}
