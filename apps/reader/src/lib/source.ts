@@ -1,6 +1,10 @@
 import type { EditionInfo, EditionSource, PageInfo, ReaderConfig, TextPage, ZoneSet } from "./types";
 
 const join = (base: string, p: string) => base.replace(/\/+$/, "") + "/" + p.replace(/^\/+/, "");
+/** A message that is safe to show a reader as it is (plain words, no codes, no URLs). */
+export class FriendlyError extends Error {
+  readonly friendly = true;
+}
 async function getJson<T>(url: string): Promise<T> {
   const r = await fetch(url);
   if (!r.ok) throw new Error(`${r.status} ${url}`);
@@ -8,17 +12,26 @@ async function getJson<T>(url: string): Promise<T> {
 }
 const abs = (base: string, u: string) => (/^(https?:)?\/\//.test(u) || u.startsWith("data:") ? u : join(base, u));
 
+/** The API sends image levels as [{w, url}]; older shapes sent {"400": url}. Accept both. */
+export function imageLevels(base: string, images: unknown): Record<number, string> {
+  if (Array.isArray(images)) return Object.fromEntries(images.map((i: any) => [Number(i.w), abs(base, String(i.url))]));
+  return Object.fromEntries(Object.entries((images ?? {}) as Record<string, unknown>).map(([k, v]) => [Number(k), abs(base, String(v))]));
+}
+
 /** HTTP source over the public read routes of the API (D5 zones at /pages/:id/zones). */
 export class HttpSource implements EditionSource {
   constructor(private base: string, private paper: string) {}
 
   async edition(date?: string): Promise<EditionInfo> {
     const q = date && date !== "latest" ? `?date=${encodeURIComponent(date)}` : "";
-    const body = await getJson<any>(join(this.base, `/v1/public/papers/${encodeURIComponent(this.paper)}/editions${q}`));
+    const r = await fetch(join(this.base, `/v1/public/papers/${encodeURIComponent(this.paper)}/editions${q}`));
+    if (r.status === 404) throw new FriendlyError("This paper was not found.");
+    if (!r.ok) throw new Error(`${r.status}`);
+    const body = await r.json();
     const list: any[] = Array.isArray(body) ? body : body.editions ?? body.items ?? [];
-    if (!list.length) throw new Error("no edition published");
+    if (!list.length) throw new FriendlyError("No edition published yet.");
     const e = [...list].sort((a, b) => String(b.date).localeCompare(String(a.date)))[0];
-    return { id: e.id, paper: this.paper, date: String(e.date).slice(0, 10), pages: e.pages ?? e.page_count ?? 0 };
+    return { id: e.id, paper: (!Array.isArray(body) && body.paper?.name) || this.paper, date: String(e.date).slice(0, 10), pages: e.pages ?? e.page_count ?? 0 };
   }
 
   async pages(ed: EditionInfo): Promise<PageInfo[]> {
@@ -28,7 +41,7 @@ export class HttpSource implements EditionSource {
       id: p.id,
       no: p.no ?? p.page ?? i + 1,
       image: p.image ?? { w: p.w, h: p.h },
-      images: Object.fromEntries(Object.entries(p.images ?? {}).map(([k, v]) => [Number(k), abs(this.base, String(v))])),
+      images: imageLevels(this.base, p.images),
       zonesUrl: join(this.base, `/v1/public/pages/${p.id}/zones`),
       textUrl: p.text_url ? abs(this.base, p.text_url) : null,
       pdfUrl: p.pdf_url ? abs(this.base, p.pdf_url) : null,

@@ -25,6 +25,7 @@ export function App() {
   const [src, setSrc] = useState<EditionSource | null>(null);
   const [data, setData] = useState<Data | null>(null);
   const [err, setErr] = useState("");
+  const [soft, setSoft] = useState(false); // true: show the message as plain words, not as a fault
   const [route, setRoute] = useState(parseHash());
   const [sheet, setSheet] = useState<{ zone: Zone; lines: string[] } | null>(null);
   const [toast, setToast] = useState("");
@@ -42,7 +43,7 @@ export function App() {
     return () => removeEventListener("hashchange", h);
   }, []);
 
-  useEffect(() => { loadConfig().then((c) => setSrc(makeSource(c))).catch((e) => setErr(String(e.message ?? e))); }, []);
+  useEffect(() => { loadConfig().then((c) => setSrc(makeSource(c))).catch((e) => { setSoft(!!e.friendly); setErr(String(e.message ?? e)); }); }, []);
 
   // load the edition once per date
   useEffect(() => {
@@ -63,7 +64,7 @@ export function App() {
           if (dead) return;
           setData((d) => d && d.ed.id === ed.id ? { ...d, zones: { ...d.zones, [p.no]: z }, text: { ...d.text, [p.no]: t } } : d);
         }));
-      } catch (e: any) { if (!dead) setErr(String(e.message ?? e)); }
+      } catch (e: any) { if (!dead) { setSoft(!!e.friendly); setErr(String(e.message ?? e)); } }
     })();
     return () => { dead = true; };
   }, [src, route.date]);
@@ -103,7 +104,8 @@ export function App() {
   };
   useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(""), 2500); return () => clearTimeout(t); }, [toast]);
 
-  if (err) return <div class="msg" role="alert">Could not load the edition: {err}</div>;
+  if (err && soft) return <div class="msg" role="status">{err}</div>;
+  if (err) return <div class="msg" role="alert">Could not load the edition. Check your connection and try again.</div>;
   if (!data || !page) return <div class="msg">Loading…</div>;
 
   if (embed) {
