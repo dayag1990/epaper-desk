@@ -1,0 +1,125 @@
+#!/usr/bin/env bash
+# Docker guard (owner rule, 2026-11-23).
+#
+# Agents never run prune, rm, rmi, `compose down`, `volume rm`, `network rm` or a force-recreate
+# against the LIVE Docker project (`epaper`). Tests use throwaway projects only.
+# This wrapper sits first on PATH as `docker` (see scripts/guard/install.sh), checks the command,
+# and only then runs the real Docker.
+#
+#   BLOCKED always ........ any `prune` (system, volume, container, image, network, builder)
+#   BLOCKED unless throwaway:
+#     docker rm / container rm / rmi / image rm / volume rm / network rm   (by what the target IS)
+#     docker compose down | rm | up --force-recreate | --remove-orphans | -V   (by the project name)
+#   ALLOWED ............... everything else: ps, logs, exec, run, build, `compose up -d --build`, restart ...
+#
+# Throwaway = a project or resource named tmp-*, test-*, drill-*, or the legacy epaper-join / epaper-bk /
+# epaper-m12 / epaper-demo-test. A compose command with NO -p is treated as LIVE, because
+# docker-compose.yml says `name: epaper`.
+#
+# What this does NOT cover (be honest): someone calling /usr/bin/docker directly, or a script that talks
+# to the Docker socket over HTTP. CLAUDE.md and every agent brief carry the same rule, and the ops
+# desk's socket proxy must keep VOLUMES=0 and SYSTEM=0 so those routes do not exist.
+#
+# Test mode: GUARD_DRY_RUN=1 prints ALLOW or BLOCK and never runs Docker.
+#            DOCKER_REAL=<path> points at a stub (the tests use this).
+set -u
+REAL="${DOCKER_REAL:-/usr/bin/docker}"
+THROW_PROJ='^((tmp|test|drill)-[A-Za-z0-9_.-]+|epaper-(join|bk|m12|demo-test))$'
+THROW_NAME='^((tmp|test|drill)[-_][A-Za-z0-9_.-]*|epaper-(join|bk|m12|demo-test)[-_][A-Za-z0-9_.-]*)$'
+
+block() {
+  echo "BLOCKED by the Docker guard: $1" >&2
+  echo "Rule: nobody deletes or prunes anything in the live project (epaper). Tests use a throwaway project named tmp-..., test-... or drill-..." >&2
+  [ "${GUARD_DRY_RUN:-}" = 1 ] && echo "BLOCK"
+  exit 126
+}
+allow() {
+  if [ "${GUARD_DRY_RUN:-}" = 1 ]; then echo "ALLOW"; exit 0; fi
+  exec "$REAL" "$@"
+}
+
+# ---- 1. prune is never allowed, in any form ----
+for a in "$@"; do
+  [ "$a" = "prune" ] && block "'prune' removes things the live stack may need, and it cannot be limited to a throwaway project."
+done
+
+# ---- 2. find the subcommand, skipping global options that take a value ----
+args=("$@"); i=0; n=${#args[@]}
+while [ $i -lt $n ]; do
+  case "${args[$i]}" in
+    -H|--host|-c|--context|-l|--log-level|--config) i=$((i + 2)) ;;
+    -*) i=$((i + 1)) ;;
+    *) break ;;
+  esac
+done
+[ $i -ge $n ] && allow "$@"
+sub="${args[$i]}"; rest=("${args[@]:$((i + 1))}")
+
+# resolve what a rm target really is: name + compose project label (empty if none).
+# Prints "name|project", or nothing when the object does not exist.
+# FAILS CLOSED: if Docker cannot be asked (no permission, daemon down) the command is blocked,
+# because "I could not check" must never be read as "it does not exist".
+resolve() { # kind target
+  local kind="$1" t="$2" out rc
+  case "$kind" in
+    container) out="$("$REAL" inspect --type container --format '{{.Name}}|{{index .Config.Labels "com.docker.compose.project"}}' "$t" 2>&1)"; rc=$? ;;
+    volume)    out="$("$REAL" volume inspect --format '{{.Name}}|{{index .Labels "com.docker.compose.project"}}' "$t" 2>&1)"; rc=$? ;;
+    network)   out="$("$REAL" network inspect --format '{{.Name}}|{{index .Labels "com.docker.compose.project"}}' "$t" 2>&1)"; rc=$? ;;
+  esac
+  if [ $rc -ne 0 ]; then
+    shopt -s nocasematch
+    if [[ "$out" == *"no such"* || "$out" == *"not found"* ]]; then shopt -u nocasematch; return 0; fi
+    shopt -u nocasematch
+    block "could not check what the $kind '$t' is, so it is treated as live. (Docker said: ${out:0:120})"
+  fi
+  printf '%s\n' "$out" | head -1
+}
+check_target() { # kind target
+  local kind="$1" t="$2" out name proj
+  out="$(resolve "$kind" "$t")"
+  [ -z "$out" ] && return 0                       # does not exist: nothing to delete
+  name="${out%%|*}"; name="${name#/}"; proj="${out##*|}"
+  if [ -n "$proj" ]; then
+    [[ "$proj" =~ $THROW_PROJ ]] || block "$kind '$name' belongs to the project '$proj', which is not a throwaway project."
+  else
+    [[ "$name" =~ $THROW_NAME ]] || block "$kind '$name' is not a throwaway resource (throwaway names start with tmp-, test- or drill-)."
+  fi
+}
+check_all() { # kind args...
+  local kind="$1"; shift
+  local t
+  for t in "$@"; do case "$t" in -*) ;; *) check_target "$kind" "$t" ;; esac; done
+}
+
+action=""; [ ${#rest[@]} -gt 0 ] && action="${rest[0]}"
+case "$sub" in
+  rm)  check_all container "${rest[@]:-}" ;;
+  rmi) for t in "${rest[@]:-}"; do case "$t" in -*|"") ;; *) [[ "${t%%:*}" =~ $THROW_NAME ]] || block "image '$t' is not a throwaway image."; esac; done ;;
+  container) case "$action" in rm|remove) check_all container "${rest[@]:1}" ;; esac ;;
+  image)     case "$action" in rm|remove) for t in "${rest[@]:1}"; do case "$t" in -*|"") ;; *) [[ "${t%%:*}" =~ $THROW_NAME ]] || block "image '$t' is not a throwaway image."; esac; done ;; esac ;;
+  volume)    case "$action" in rm|remove) check_all volume "${rest[@]:1}" ;; esac ;;
+  network)   case "$action" in rm|remove) check_all network "${rest[@]:1}" ;; esac ;;
+  compose)
+    project="${COMPOSE_PROJECT_NAME:-}"; j=0; m=${#rest[@]}; csub=""
+    while [ $j -lt $m ]; do
+      case "${rest[$j]}" in
+        -p|--project-name) project="${rest[$((j + 1))]:-}"; j=$((j + 2)) ;;
+        --project-name=*)  project="${rest[$j]#*=}"; j=$((j + 1)) ;;
+        -f|--file|--profile|--env-file|--project-directory|--ansi|--parallel|--progress) j=$((j + 2)) ;;
+        -*) j=$((j + 1)) ;;
+        *) csub="${rest[$j]}"; break ;;
+      esac
+    done
+    if ! [[ "$project" =~ $THROW_PROJ ]]; then   # empty project = the live one (compose file says name: epaper)
+      shown="${project:-epaper (no -p given)}"
+      case "$csub" in
+        down|rm) block "'compose $csub' on the project '$shown' would delete live containers or volumes." ;;
+        up)
+          for a in "${rest[@]:$((j + 1))}"; do
+            case "$a" in --force-recreate|--remove-orphans|-V|--renew-anon-volumes)
+              block "'compose up $a' on the project '$shown' deletes and recreates live containers or volumes." ;; esac
+          done ;;
+      esac
+    fi ;;
+esac
+allow "$@"

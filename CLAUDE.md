@@ -216,6 +216,12 @@ These need the client or come later. Do not fake them:
 
 - Never mark a module done on a failing or skipped test.
 - Never expose the Docker socket to the network.
+- Never delete anything in the LIVE Docker project `epaper`, and never prune anything on the Docker host (owner rule, after the 2026-11-23 incident in STATUS.md). That means: no `prune` in any form, no `docker rm`, `rmi`, `volume rm`, `network rm`, no `compose down` (with or without `-v`), no `compose rm`, no `up --force-recreate` / `--remove-orphans` / `-V`, and no HTTP call to the Docker API that does the same (`POST /volumes/prune`, `DELETE ...`). A bare `docker compose` with no `-p` counts as live, because `docker-compose.yml` says `name: epaper`.
+  - Tests and drills use throwaway projects only, named `tmp-*`, `test-*` or `drill-*`, and clean up only what they created.
+  - `scripts/guard/docker` enforces this: it is installed first on PATH as `docker` (`scripts/guard/install.sh`), it fails closed, and its 68 checks are in `tests/docker-guard.test.ts`. Claude Code settings also deny any command containing a Docker prune. Never bypass either (no `/usr/bin/docker`, no raw socket calls).
+  - Every sub-agent brief that touches Docker must repeat this rule.
+  - The ops desk's socket proxy must keep `VOLUMES=0` and `SYSTEM=0`, so those routes do not exist. A deploy (`compose up -d --build`) is allowed; it replaces changed containers and never deletes volumes.
+  - Removing a live container or volume is done only by the owner, or by the ops desk behind its typed confirmation and snapshot.
 - Never make the ops desk reachable without login + TOTP.
 - Never touch the off-box backups except through M13's own tools.
 - Never scrape a site the paper does not own or have rights to.
