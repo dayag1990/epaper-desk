@@ -97,6 +97,31 @@ importers:
 
   apps/ops: {}
 
+  apps/reader:
+    dependencies:
+      preact:
+        specifier: 10.25.4
+        version: 10.25.4
+    devDependencies:
+      '@epaper/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@epaper/epaper':
+        specifier: workspace:*
+        version: link:../../packages/epaper
+      '@playwright/test':
+        specifier: 1.49.1
+        version: 1.49.1
+      typescript:
+        specifier: 5.6.3
+        version: 5.6.3
+      vite:
+        specifier: 5.4.21
+        version: 5.4.21(@types/node@22.10.2)
+      vitest:
+        specifier: 2.1.8
+        version: 2.1.8(@types/node@22.10.2)
+
   apps/worker:
     dependencies:
       pg:
@@ -1528,6 +1553,9 @@ packages:
 
   postgres-range@1.1.4:
     resolution: {integrity: sha512-i/hbxIE9803Alj/6ytL7UHQxRvZkI9O4Sy+J3HGc4F4oo/2eQAjTSNJ0bfxyse3bH0nuVesCk+3IRLaMtG3H6w==}
+
+  preact@10.25.4:
+    resolution: {integrity: sha512-jLdZDb+Q+odkHJ+MpW/9U5cODzqnB+fy2EiHSZES7ldV5LK7yjlVzTp7R8Xy6W6y75kfK8iWYtFVH7lvjwrCMA==}
 
   prisma@6.2.1:
     resolution: {integrity: sha512-hhyM0H13pQleQ+br4CkzGizS5I0oInoeTw3JfLw1BRZduBSQxPILlJLwi+46wZzj9Je7ndyQEMGw/n5cN2fknA==}
@@ -3106,6 +3134,8 @@ snapshots:
   postgres-interval@3.0.0: {}
 
   postgres-range@1.1.4: {}
+
+  preact@10.25.4: {}
 
   prisma@6.2.1:
     dependencies:
