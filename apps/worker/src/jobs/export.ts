@@ -1,7 +1,8 @@
 import { PageDocSchema, type PageDoc } from "@epaper/core";
 import { exportScreenPdf, pageDocsToModel, toCXML, type EditionPage } from "@epaper/export";
+import { packEditionIdml, type PackedAsset } from "@epaper/idml";
 import { prisma } from "../db.js";
-import { articlesForRender, day, edRef, emitWebhook, enqueue, loadArticles, storeFile, type JobCtx } from "../ctx.js";
+import { articlesForRender, driver, day, edRef, emitWebhook, enqueue, loadArticles, storeFile, type JobCtx } from "../ctx.js";
 import { pool } from "../pool.js";
 import { templateSet } from "../templates.js";
 import type { Envelope } from "../main.js";
@@ -44,6 +45,26 @@ export async function exportRun(e: Envelope, job: JobCtx) {
         if (!ep) ep = await prisma.epEdition.create({ data: { paper_id: e.paper_id, date: ed.date, source: "export", export_id: ex.id, edition_id: ed.id, pdf_key: pdf.key, pdf_hash: pdf.hash, status: "building" } });
         await enqueue("epaper.build", e.paper_id, { ep_edition_id: ep.id }, `build:${ep.id}`);
       }
+    } else if (ex.format === "idml") {
+      const snap = await pool.withEngine((eng) => eng.snapshot(edRef(ed.id), pages, articles));
+      // pictures: the originals in the files store, named by asset id inside Links/
+      const assetIds = [...new Set(snap.pages.flatMap((p) => p.frames.map((f) => f.asset_id).filter(Boolean) as string[]))];
+      const rows = assetIds.length ? await prisma.asset.findMany({ where: { paper_id: e.paper_id, asset_id: { in: assetIds }, status: "ready", orig_key: { not: null } } }) : [];
+      const assets: PackedAsset[] = [];
+      for (const r of rows) {
+        try {
+          assets.push({ asset_id: r.asset_id, ext: r.orig_key!.split(".").pop()!, bytes: await driver.get(r.orig_key!), ...(r.w && r.h ? { w_px: r.w, h_px: r.h } : {}) });
+        } catch { /* reported as missing below */ }
+      }
+      const fontStyles = Object.assign({}, ...pages.map((p) => p.template.idml?.font_styles ?? {})) as Record<string, string>;
+      const base = `${paper.slug}_${day(ed.date)}`;
+      const r = await packEditionIdml(snap, assets, base, { fontStyles, indicComposer: "HL Composer Optyca" });
+      for (const id of r.missing) log.push(logLine(`A photo (${id}) is not in the files store. Its frame is in the file, but InDesign will show a missing link until you relink it.`));
+      for (const a of assets) if (a.ext === "webp") log.push(logLine(`Photo ${a.asset_id} is a WebP file. InDesign before 2023 cannot place WebP; convert it or relink.`));
+      const f = await storeFile(e.paper_id, "idml", "zip", Buffer.from(r.zip));
+      const sf = await storeFile(e.paper_id, "snapshot", "json", Buffer.from(JSON.stringify(snap)));
+      log.push(logLine(`InDesign package written: ${pages.length} pages, ${r.linked.length} linked photos, ${r.idml.styles.length} paragraph styles (${r.idml.styles.join(", ")}), ${f.size} bytes`));
+      await save("done", { file_key: f.key, snapshot_key: sf.key, file_name: `${base}.zip`, finished_at: new Date() });
     } else throw new Error(`The ${ex.format} export is not available.`);
     await emitWebhook(e.paper_id, "export.ready", { event: "export.ready", paper: paper.slug, edition: day(ed.date), format: ex.format, export_id: ex.id });
   } catch (err) {

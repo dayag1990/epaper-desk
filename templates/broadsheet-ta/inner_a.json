@@ -78,6 +78,16 @@
     "sub": "Story-sub-head",
     "body": "Story-body"
   },
+  "idml": {
+    "font_styles": {
+      "Masthead": "ExtraBold",
+      "Strip": "Bold",
+      "Story-kicker": "Bold",
+      "Story-head": "ExtraBold",
+      "Story-sub-head": "Bold",
+      "Story-body": "Regular"
+    }
+  },
   "slots": [
     {
       "id": "story_col_span-5-1",

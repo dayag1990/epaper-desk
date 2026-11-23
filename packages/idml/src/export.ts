@@ -26,6 +26,11 @@ export interface IdmlOptions {
   linkBase?: string;
   /** Paragraph composer written on styles whose text is Indic script. Default "HL Composer Optyca" (World-Ready, per M6 spec); null = do not write one. */
   indicComposer?: string | null;
+  /**
+   * FontStyle written per paragraph style (after the style map), e.g. {"Story-head": "ExtraBold"}: the named instance of a
+   * variable family InDesign should pick. Styles not listed get "Regular".
+   */
+  fontStyles?: Record<string, string>;
 }
 
 export interface IdmlResult {
@@ -170,7 +175,7 @@ export async function exportIdml(input: LayoutSnapshot | readonly LayoutSnapshot
 
   const styleDefs = [...styles.values()].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   const pstyles = styleDefs.map((s) =>
-    el("ParagraphStyle", { Self: pstyleSelf(s.name), Name: nfc(s.name), Imported: false, KeyboardShortcut: "0 0", ...(s.size ? { PointSize: s.size } : {}), FontStyle: "Regular" }, el("Properties", {}, [
+    el("ParagraphStyle", { Self: pstyleSelf(s.name), Name: nfc(s.name), Imported: false, KeyboardShortcut: "0 0", ...(s.size ? { PointSize: s.size } : {}), FontStyle: opts.fontStyles?.[s.name] ?? "Regular", ...(s.indic ? { Hyphenation: false } : {}) }, el("Properties", {}, [
       el("BasedOn", { type: "string" }, "$ID/[No paragraph style]"),
       ...(s.font ? [el("AppliedFont", { type: "string" }, esc(s.font))] : []),
       ...(s.indic && composer ? [el("Composer", { type: "string" }, esc(composer))] : []),

@@ -186,6 +186,9 @@ importers:
       '@epaper/export':
         specifier: workspace:*
         version: link:../../packages/export
+      '@epaper/idml':
+        specifier: workspace:*
+        version: link:../../packages/idml
       '@epaper/layout':
         specifier: workspace:*
         version: link:../../packages/layout

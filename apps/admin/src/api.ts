@@ -54,7 +54,7 @@ export class Api {
   overview = (id: string) => this.req<Overview>("GET", `/v1/admin/editions/${id}/overview`);
   autoplan = (id: string) => this.req<{ job_id: string }>("POST", `/v1/editions/${id}/autoplan`, {});
   approveAll = (id: string) => this.req<{ approved: number; skipped: number }>("POST", `/v1/admin/editions/${id}/approve-all`);
-  exportEdition = (id: string, format: "pdf_screen" | "cxml") => this.req<{ id: string }>("POST", `/v1/editions/${id}/exports`, { format });
+  exportEdition = (id: string, format: "pdf_screen" | "cxml" | "idml") => this.req<{ id: string }>("POST", `/v1/editions/${id}/exports`, { format });
   publish = (readerId: string, at?: string) => this.req<{ status: string }>("POST", `/v1/epaper/editions/${readerId}/publish`, at ? { at } : {});
   rollback = (readerId: string) => this.req<{ rolled_back: "page" | "edition"; no?: number }>("POST", `/v1/epaper/editions/${readerId}/rollback`);
 

@@ -70,7 +70,11 @@ test("create an edition, auto-plan, approve, export, publish, roll back", async 
   await expect(detail.getByTestId("page").nth(0)).toContainText("92% full");
   await expect(detail.getByTestId("page").nth(2)).toContainText("too much text");
   await expect(detail.getByRole("link", { name: "Open in the editor" })).toHaveAttribute("href", /\/\?edition=e1$/);
-  await expect(detail.getByRole("button", { name: /IDML.*not available yet/ })).toBeDisabled();
+  const idmlBtn = detail.getByRole("button", { name: /Make InDesign file \(IDML\)/ });
+  await expect(idmlBtn).toBeEnabled();
+  await idmlBtn.click();
+  await expect(detail.getByTestId("export").filter({ hasText: "InDesign (IDML)" })).toContainText("Ready", { timeout: 15_000 });
+  await expect(detail.getByTestId("export").filter({ hasText: "InDesign (IDML)" }).getByRole("link", { name: "Download" })).toBeVisible();
   await detail.getByRole("button", { name: "Approve all pages" }).click();
   await page.getByRole("button", { name: "Approve all", exact: true }).click();
   await expect(detail.getByTestId("next-step")).toContainText("Make the PDF");

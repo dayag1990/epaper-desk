@@ -16,6 +16,7 @@ function Detail({ api, id, me }: Pick<ScreenProps, "api" | "me"> & { id: string 
   if (!o) return <p className="muted">{error ?? "Loading…"}</p>;
   const pdf = o.exports.find((e) => e.format === "pdf_screen");
   const cxml = o.exports.find((e) => e.format === "cxml");
+  const idml = o.exports.find((e) => e.format === "idml");
   const approved = o.pages.length > 0 && o.pages.every((p) => p.status === "approved");
   const act = (fn: () => Promise<unknown>, ok: string) => async () => { if (await run(fn, ok)) reload(); };
   return (
@@ -47,13 +48,13 @@ function Detail({ api, id, me }: Pick<ScreenProps, "api" | "me"> & { id: string 
           <div className="row wrap">
             <button disabled={busy} onClick={act(() => api.exportEdition(id, "pdf_screen"), "Making the PDF.")}>Make PDF</button>
             <button disabled={busy} onClick={act(() => api.exportEdition(id, "cxml"), "Making ContentXML.")}>Make ContentXML</button>
-            <button disabled title="Not available yet">InDesign (IDML): not available yet</button>
+            <button disabled={busy} title="A zip with the .idml file and its Links folder, for InDesign" onClick={act(() => api.exportEdition(id, "idml"), "Making the InDesign file.")}>Make InDesign file (IDML)</button>
           </div>
         </>
       )}
       {o.exports.length > 0 && (
         <ul className="plain">
-          {[pdf, cxml].filter(Boolean).map((e) => <li key={e!.id} data-testid="export">{FORMAT_WORDS[e!.format] ?? e!.format}: {EXPORT_WORDS[e!.status] ?? e!.status} {e!.url && <a href={e!.url} download>Download</a>}</li>)}
+          {[pdf, cxml, idml].filter(Boolean).map((e) => <li key={e!.id} data-testid="export">{FORMAT_WORDS[e!.format] ?? e!.format}: {EXPORT_WORDS[e!.status] ?? e!.status} {e!.url && <a href={e!.url} download>Download</a>}</li>)}
         </ul>
       )}
 
