@@ -6,9 +6,17 @@
     "node": ">=22"
   },
   "scripts": {
-    "build": "pnpm -r build",
-    "test": "pnpm -r --if-present test",
-    "typecheck": "pnpm -r --if-present typecheck"
+    "build": "pnpm -r --if-present build",
+    "test": "pnpm -r --if-present test && vitest run",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "db:generate": "prisma generate --schema prisma/schema.prisma",
+    "db:seed": "tsx prisma/seed.mts",
+    "test:stack": "vitest run"
+  },
+  "dependencies": {
+    "@prisma/client": "6.2.1",
+    "argon2": "0.41.1",
+    "prisma": "6.2.1"
   },
   "devDependencies": {
     "typescript": "5.6.3",
@@ -17,5 +25,14 @@
     "tsx": "4.19.2",
     "sharp": "0.33.5",
     "playwright": "1.49.1"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "argon2",
+      "prisma",
+      "@prisma/client",
+      "@prisma/engines",
+      "esbuild"
+    ]
   }
 }

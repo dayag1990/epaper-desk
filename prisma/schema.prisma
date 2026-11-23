@@ -1,0 +1,157 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  owner
+  editor
+  sub
+  designer
+  viewer
+}
+
+model Paper {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  slug       String    @unique
+  name       String
+  lang       String    @default("en")
+  script     String    @default("Latn")
+  page_w_mm  Int       @default(300)
+  page_h_mm  Int       @default(450)
+  tz         String    @default("UTC")
+  domain     String?
+  theme      Json?
+  created_at DateTime  @default(now())
+  updated_at DateTime  @default(now()) @updatedAt
+  deleted_at DateTime?
+
+  memberships Membership[]
+  sessions    Session[]
+  api_keys    ApiKey[]
+  sources     Source[]
+  files       File[]
+  audit       AuditLog[]
+
+  @@map("papers")
+}
+
+model User {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email      String    @unique
+  pw_hash    String
+  name       String
+  created_at DateTime  @default(now())
+  deleted_at DateTime?
+
+  memberships Membership[]
+  sessions    Session[]
+
+  @@map("users")
+}
+
+model Membership {
+  user_id    String    @db.Uuid
+  paper_id   String    @db.Uuid
+  role       Role
+  created_at DateTime  @default(now())
+  deleted_at DateTime?
+
+  user  User  @relation(fields: [user_id], references: [id])
+  paper Paper @relation(fields: [paper_id], references: [id])
+
+  @@id([user_id, paper_id])
+  @@index([paper_id])
+  @@map("memberships")
+}
+
+model Session {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  token_hash String    @unique
+  user_id    String    @db.Uuid
+  paper_id   String    @db.Uuid
+  created_at DateTime  @default(now())
+  expires_at DateTime
+  revoked_at DateTime?
+
+  user  User  @relation(fields: [user_id], references: [id])
+  paper Paper @relation(fields: [paper_id], references: [id])
+
+  @@index([paper_id])
+  @@map("sessions")
+}
+
+model ApiKey {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  paper_id     String    @db.Uuid
+  source_id    String?   @db.Uuid
+  key_hash     String    @unique
+  label        String    @default("")
+  last_used_at DateTime?
+  created_at   DateTime  @default(now())
+  deleted_at   DateTime?
+
+  paper Paper @relation(fields: [paper_id], references: [id])
+
+  @@index([paper_id])
+  @@map("api_keys")
+}
+
+model Source {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  paper_id     String    @db.Uuid
+  kind         String
+  name         String
+  config       Json      @default("{}")
+  mapping      Json?
+  schedule     String?
+  last_sync_at DateTime?
+  status       String    @default("idle")
+  created_at   DateTime  @default(now())
+  updated_at   DateTime  @default(now()) @updatedAt
+  deleted_at   DateTime?
+
+  paper Paper @relation(fields: [paper_id], references: [id])
+
+  @@index([paper_id])
+  @@map("sources")
+}
+
+model File {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  paper_id   String    @db.Uuid
+  hash       String
+  kind       String
+  ext        String
+  size       Int
+  key        String    @unique
+  created_by String?   @db.Uuid
+  created_at DateTime  @default(now())
+  deleted_at DateTime?
+
+  paper Paper @relation(fields: [paper_id], references: [id])
+
+  @@index([paper_id, hash])
+  @@map("files")
+}
+
+model AuditLog {
+  id        BigInt   @id @default(autoincrement())
+  paper_id  String   @db.Uuid
+  user_id   String?  @db.Uuid
+  action    String
+  entity    String
+  entity_id String?
+  before    Json?
+  after     Json?
+  at        DateTime @default(now())
+
+  paper Paper @relation(fields: [paper_id], references: [id])
+
+  @@index([paper_id, at])
+  @@map("audit_log")
+}
