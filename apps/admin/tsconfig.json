@@ -13,5 +13,5 @@
     "baseUrl": ".",
     "paths": { "@epaper/core": ["../../packages/core/src/index.ts"] }
   },
-  "include": ["src", "mock", "tests", "e2e", "vite.config.ts", "playwright.config.ts"]
+  "include": ["src", "mock", "tests", "e2e", "e2e-real", "playwright.real.config.ts", "vite.config.ts", "playwright.config.ts"]
 }
