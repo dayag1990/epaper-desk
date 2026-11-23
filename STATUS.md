@@ -2,6 +2,7 @@
 Start: 2026-11-23 22:58 IST (2026-11-23 17:28 UTC) · Demo-ready target: 2026-11-25 22:58 IST (2026-11-25 17:28 UTC) · Contract deadline: 2026-11-26 22:58 IST (2026-11-26 17:28 UTC) · Hour: 0 of 48 · Block: FLOOR
 
 ## Done                (module · the check that passed)
+- Backup · files: restic → Backblaze B2 backup + restore, 6 files byte-identical (lead ran it after the owner fixed the key ID). Database half: see DECISION NEEDED, not yet proven
 - Host · 8 GB swap on, in /etc/fstab, swappiness 10 (swapon --show: 8G)
 - Host · Docker 29.10 + Compose 5.8 from Docker's apt repo; `docker run hello-world` as epaper passed
 - Host · Node 22.23, pnpm 9.15.4, Poppler 24.02 installed
@@ -30,7 +31,6 @@ Start: 2026-11-23 22:58 IST (2026-11-23 17:28 UTC) · Demo-ready target: 2026-11
 - Merging an agent branch: rebase it onto main first. Old base 46d141a → new 0e09a2f (m0, toolchain); old d985ecf → new b9a7234 (m4, m1). Drop any Co-Authored-By line from the branch's own commits.
 - Demo path: M0 → contracts → English ingest → edit/refit → PDF → e-paper
 ## Blocked
-- Off-box backup test: B2 says "Malformed Access Key Id". BACKUP_S3_KEY is 12 hex chars (looks like the Backblaze Account ID); an application key ID is 25 chars starting 003. Scripts ready: scripts/lib/backup-env.sh, ops/postgres/Dockerfile (Postgres + WAL-G image built). Re-test as soon as the key ID is fixed.
 ## Incidents
 - 2026-11-23 18:4x UTC · an unanchored `files/` ignore rule hid apps/api/src/files; removing the m0 worktree deleted it. Restored from the built api image (complete, 1 file), committed, rule anchored to `/files/`. Rule now: check `git status --ignored` before removing any worktree.
 ## WAITING ON OWNER    (what · why · what is stubbed meanwhile)
@@ -46,6 +46,7 @@ Start: 2026-11-23 22:58 IST (2026-11-23 17:28 UTC) · Demo-ready target: 2026-11
 - InDesign open-test of an exported IDML · no InDesign on the box · validator checks structure only. To check: no repair dialog, Links/ relink, styles map by name, Gurmukhi shaping
 - Recovery kit entry in a password manager · cannot be checked from the box
 ## DECISION NEEDED
+- (decided by owner 2026-11-23) WAL-G dropped. Evidence: restic (files) backup+restore to Backblaze B2 works and is byte-identical; WAL-G 3.0.5 reads B2 (backup-list answers) but every write (`st put`, `wal-push`, `backup-push`) hangs, with and without libsodium encryption, last log line "disable 100 continue false"; during Postgres first start wal-push blocks the temporary server's shutdown ("pg_ctl: server does not shut down"). New design, same 1-minute loss target: archive_command copies each WAL segment to a local folder (archive_timeout 30 s), nightly pg_basebackup to a local folder, restic pushes files + WAL folder + basebackups to B2 every minute. Restore = latest basebackup + archived WAL replay.
 ## Cut                 (what was cut under the cut order, and when)
 ## Log                 (one line per hour, newest first)
 - 2026-11-23 · Hour 3 · M9, M2 merged; backup test blocked on key ID; lead session switched to Sonnet at the owner's request (Opus for hard debugging/review only).
