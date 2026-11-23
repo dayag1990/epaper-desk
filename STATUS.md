@@ -17,6 +17,7 @@ Start: 2026-11-23 22:58 IST (2026-11-23 17:28 UTC) · Demo-ready target: 2026-11
 - M9/M10 · reader PWA: thumbnails, swipe, pinch zoom with w400/w1600/w3200 levels, zone tap opens the right story (20/20), search in one edition, offline reopen, embed.js shows cover + opens reader; JS 27 kB (11 kB gzip) (11 unit + 6 e2e, re-run by lead). NOT YET: 4G timing, 360/1440 px, Gurmukhi/Telugu in sheet, HttpSource against the real API. CUT: JWT paywall
 - M2 · assets: ingest + derivatives, focal crop, rule-based cut-out 224 ms IoU 0.977 (3000 px: 430 ms, 0.975), provider-down keeps photo usable (18 tests, re-run by lead). NOT YET: 100-URL dedupe run, text wrap in editor, API retry wiring
 - JOIN · 12-step English demo with no AI key passes on a fresh stack (wizard → 15 articles → 4 pages → headline edit refits → PDF + ContentXML → e-paper build/publish/webhook → reader zones → page replace + rollback), re-run by lead (57 s). Live stack rebuilt from main, healthy; editor at 8100 /, reader + embed.js at 8102, public read API through 8102. NOT YET: IDML/press/cut-out routes (501), live demo data loaded in the live stack
+- M12 · admin console at /admin: login, sources + wizard, articles, editions (plan/approve/export/publish/rollback), people, connections (keys, webhooks), activity, AI switch (default off, needs key AND owner switch); 27 api + 14 admin unit + 7 e2e, re-run by lead; one real-API e2e passed. Fixed by lead before merge: editor /me and /ai/suggest now obey key AND switch (4 tests); hidden stories no longer un-hide when the source changes. NOT YET: create a new paper (no platform role), fix-a-wrong-zone screen. CUT: template slot-editor
 - All packages · 83 tests pass together on main
 - M4 · layout engine ported; prototype SAMPLE matches exactly; 15 English → 4 pages in ~1 s; same plan every run; editor vs headless <0.5 % pixels; D4 snapshot valid (12 tests, re-run by lead). NOT YET: Punjabi page 2 overflow check (fonts were missing; Noto Gurmukhi now installed on host — must also go into the images)
 - Toolchain · Postgres 17.2, Node 22.12, Playwright 1.49.1 Chromium, sharp 0.33.5, Poppler, qpdf 11.3, WAL-G 3.0.5, restic 0.17.3 all PASS on amd64 (docs/toolchain.md). WAL archiving not yet proven: base backup only
@@ -25,9 +26,11 @@ Start: 2026-11-23 22:58 IST (2026-11-23 17:28 UTC) · Demo-ready target: 2026-11
 - Repo · /srv/epaper/desk, git main, D7 folders, spec at docs/build-spec.json
 ## Doing
 - Sub-agent (Sonnet) · M13 ops desk: login + TOTP, lights, fix buttons, alerts (branch ops)
-- Sub-agent (Sonnet) · M12 admin console: sources + wizard, articles, editions, users, webhooks, AI switch (branch m12)
+- Sub-agent (Sonnet) · Demo rehearsal: demo data into the live stack, beats 1–7 through the real screens, screenshots (branch demo)
 - Sub-agent (Sonnet) · M13 backup: local WAL archive + nightly basebackup + restic to B2 every minute, restore.sh, drill (branch backup)
 ## Next
+- Build order on deploy: `pnpm --filter @epaper/editor --filter @epaper/admin --filter @epaper/reader build` THEN `docker compose up -d --build` (Dockerfile copies built dist folders; restore.sh must do this)
+- Worker `ai` queue still reads global AI_ENABLED (no AI job exists yet; M3 last)
 - Load the English demo into the LIVE stack and walk beats 1–7 by hand-through-browser (Playwright screenshots); beat 8 (Punjabi cxml)
 - apps/reader/dist is built output (gitignored): restore.sh/deploy must run `pnpm --filter @epaper/reader build` before compose up
 - M4 follow-up: auto-plan balances unevenly (one page at 60 % fill); re-check Punjabi overflow with fonts
