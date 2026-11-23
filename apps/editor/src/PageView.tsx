@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { PageDoc } from "@epaper/core";
 import type { Article } from "@epaper/core";
 import { domReady, renderPage, type Template } from "./layout";
+import { fontBase } from "./config";
 import { docSig, refitDom, type Meter } from "./refit";
 import { applyText, type TextSnapshot } from "./tools";
 import { COLS_STEP_PX, COLUMNS, DRAG_THRESHOLD_PX, colsFromDrag, dropIndex, predictSlot, readoutText, rowBottom, rowTop, rowsOf, spanFromLeft, spanFromRight, type Rect } from "./flow";
@@ -127,6 +128,15 @@ export function PageView(p: PageViewProps) {
     setBox((o) => (o && Object.keys(nb).every((k) => Math.abs((o as never)[k] - (nb as never)[k]) < 0.01) ? o : nb));
   };
 
+  /** The page is laid out at canvas size and scaled by a transform (see css.ts), so the host box gets the scaled size explicitly. */
+  const fitHost = () => {
+    const h = host.current, pg = h?.querySelector<HTMLElement>(".page");
+    if (!h || !pg) return;
+    const z = props.current.zoom;
+    h.style.width = `${pg.offsetWidth * z}px`;
+    h.style.height = `${pg.offsetHeight * z}px`;
+  };
+
   /** Selection state on the rendered blocks: class, role, aria-pressed, focusable. */
   const decorate = () => {
     host.current?.querySelectorAll<HTMLElement>(".story[data-item]").forEach((e) => {
@@ -191,13 +201,14 @@ export function PageView(p: PageViewProps) {
       sigRef.current = sig;
       const hadFocus = refocus.current || !!(document.activeElement && h.contains(document.activeElement));
       refocus.current = false;
-      const r = renderPage(p.doc, p.template, p.articles, { editable: p.editable });
+      const r = renderPage(p.doc, p.template, p.articles, { editable: p.editable, fontBase: fontBase() });
       h.innerHTML = `<style>${r.css}\n.story.sel{outline:4px solid #1a73e8;outline-offset:4px}[contenteditable]:focus{outline:none}</style>${r.html}`;
       // Nothing is editable until a double click / Enter; the renderer's editing aids are parked in data-ce.
       h.querySelectorAll("[contenteditable]").forEach((e) => { e.removeAttribute("contenteditable"); e.setAttribute("data-ce", "1"); });
       editScope.current = null;
       setEditing(false);
       h.querySelector<HTMLElement>(".page")!.style.setProperty("--z", String(props.current.zoom));
+      fitHost();
       decorate();
       if (hadFocus && props.current.selected) h.querySelector<HTMLElement>(`.story[data-item="${CSS.escape(props.current.selected)}"]`)?.focus({ preventScroll: true });
       measure();
@@ -205,6 +216,7 @@ export function PageView(p: PageViewProps) {
   });
   useLayoutEffect(() => {
     host.current?.querySelector<HTMLElement>(".page")?.style.setProperty("--z", String(p.zoom));
+    fitHost();
   }, [p.zoom]);
   useEffect(() => {
     measure();
@@ -220,7 +232,7 @@ export function PageView(p: PageViewProps) {
     const h = host.current;
     const page = h?.querySelector(".page");
     if (!h || !page || typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(() => updateBox());
+    const ro = new ResizeObserver(() => { fitHost(); updateBox(); });
     ro.observe(page);
     const on = () => updateBox();
     addEventListener("resize", on);

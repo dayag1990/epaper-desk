@@ -4,6 +4,8 @@ export interface EditorConfig {
   /** Dev/test only: which fake user the mock API should treat us as. */
   mockUser?: string;
   edition?: string;
+  /** First editor zoom (default 0.5). Used by tests that must look at the page at an exact zoom. */
+  zoom?: number;
   autosaveMs: number;
   heartbeatMs: number;
   lockPollMs: number;
@@ -23,9 +25,13 @@ export function loadConfig(): EditorConfig {
     apiBase: (injected.apiBase ?? env.VITE_API_BASE ?? "").replace(/\/$/, ""),
     mockUser: injected.mockUser ?? q.get("as") ?? undefined,
     edition: injected.edition ?? q.get("edition") ?? env.VITE_EDITION ?? undefined,
+    zoom: injected.zoom ?? (q.get("zoom") ? Number(q.get("zoom")) : undefined),
     autosaveMs: injected.autosaveMs ?? 2000, // spec: 2 s debounce
     heartbeatMs: injected.heartbeatMs ?? 120_000, // spec: 2 min heartbeat
     lockPollMs: injected.lockPollMs ?? 15_000,
     retryMs: injected.retryMs ?? 5000,
   };
 }
+
+/** Where the page fonts come from: the API's /fonts route (same files the server renders with). */
+export const fontBase = (): string => `${loadConfig().apiBase}/fonts`;

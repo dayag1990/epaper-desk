@@ -3,7 +3,7 @@ import { PageDocSchema } from "@epaper/core";
 import { LayoutEngine, type FitOptions, type FitReport } from "./engine.js";
 import { defaultRatio, defaultSpan } from "./render.js";
 import { packSpans } from "./pack.js";
-import type { Slot, Template } from "./template.js";
+import { colsForSpan, type Slot, type Template } from "./template.js";
 import { round } from "./units.js";
 
 export interface AdBooking {
@@ -16,6 +16,12 @@ export interface AutoPlanOptions {
   pages?: number;
   /** Keep each section on its own page (the prototype's sections-are-pages behaviour). Default true when `pages` is not given. */
   bySection?: boolean;
+  /**
+   * Section names in page order: sectionPages[0] is page 1, and so on, so the plan follows the paper's own section order
+   * instead of "first appearance in priority order". Sections not listed follow, in order of first appearance; listed
+   * sections with no articles are skipped. (A per-article layout_hint.page still wins over the section name.)
+   */
+  sectionPages?: string[];
   date?: string; // printed in the strip; no clock is read, so plans are repeatable
   ads?: AdBooking[];
   fit?: FitOptions;
@@ -86,18 +92,18 @@ function toItem(a: Article, pageNo: number, n: number, t: Template, used: Set<st
   let slot: string, span: number, cols: number;
   if (spanOv != null && !(a.layout_hint && hinted)) {
     span = Math.min(t.columns, Math.max(1, spanOv));
-    slot = `story_col_span-${span}-${n}`; cols = span;
+    slot = `story_col_span-${span}-${n}`; cols = colsForSpan(span, t);
   } else if (a.layout_hint && hinted) {
     slot = a.layout_hint.slot;
     span = Math.min(t.columns, Math.max(1, a.layout_hint.span || defaultSpan({ kind, slot }, t.columns)));
-    cols = span;
+    cols = colsForSpan(span, t);
   } else {
     const s = chooseSlot(kind, w, hasImage, used, t);
     if (s) { slot = s.id; span = s.span; cols = s.cols; used.add(s.id); }
     else {
       span = w < 70 ? 2 : w < 160 ? 3 : w < 280 ? 4 : 5;
       span = Math.min(t.columns, Math.max(1, Math.round((span * t.columns) / 8)));
-      slot = `story_col_span-${span}-${n}`; cols = span;
+      slot = `story_col_span-${span}-${n}`; cols = colsForSpan(span, t);
     }
   }
   const img = a.images[0];
@@ -126,7 +132,7 @@ function finishItems(items: PageItem[], t: Template): PageItem[] {
     return {
       ...it,
       span,
-      cols: stretched && it.cols === it.span ? span : Math.min(it.cols ?? span, span),
+      cols: stretched && it.cols === colsForSpan(it.span ?? span, t) ? colsForSpan(span, t) : Math.min(it.cols ?? colsForSpan(span, t), span),
       ...(it.image ? { image: { ...it.image, ratio: defaultRatio(it.kind, span) } } : {}),
     };
   });
@@ -134,7 +140,7 @@ function finishItems(items: PageItem[], t: Template): PageItem[] {
 
 function buildDoc(pageNo: number, t: Template, items: PageItem[], opts: AutoPlanOptions, section: string): PageDoc {
   const strip: [string, string, string] =
-    pageNo === 1 ? [t.furniture.strip[0], opts.date ?? t.furniture.strip[1], t.furniture.strip[2]] : [section, opts.date ?? t.furniture.strip[1], `PAGE ${pageNo}`];
+    pageNo === 1 ? [t.furniture.strip[0], opts.date ?? t.furniture.strip[1], t.furniture.strip[2]] : [section, opts.date ?? t.furniture.strip[1], `${t.furniture.page_label ?? "PAGE"} ${pageNo}`];
   const doc = {
     page: { no: pageNo, size: t.size.id, w_mm: t.size.w_mm, h_mm: t.size.h_mm, template: t.id, body_pt: round(t.body.start_px * (t.size.w_mm / t.canvas_px / 25.4 * 72), 3) },
     furniture: { masthead: t.furniture.masthead, tagline: t.furniture.tagline, strip },
@@ -208,6 +214,8 @@ export async function autoPlan(
   const sectionKey = (a: Article) => a.layout_hint?.page ?? a.section;
   // section order = first appearance in priority order
   const secOrder: string[] = [];
+  const present = new Set(sorted.map(sectionKey));
+  for (const s of opts.sectionPages ?? []) if (present.has(s) && !secOrder.includes(s)) secOrder.push(s);
   for (const a of sorted) if (!secOrder.includes(sectionKey(a))) secOrder.push(sectionKey(a));
   const bySection = opts.bySection ?? opts.pages == null;
   const nPages = Math.max(1, opts.pages ?? secOrder.length);

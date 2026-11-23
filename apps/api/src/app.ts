@@ -27,6 +27,7 @@ import { epaperRoutes } from "./routes/epaper.js";
 import { publicRoutes } from "./routes/public.js";
 import { adminRoutes } from "./routes/admin-index.js";
 import { serveEditor } from "./lib/static.js";
+import { fontRoutes } from "./routes/fonts.js";
 
 export async function buildApp() {
   const app = Fastify({ logger: { level: "info", redact: ["req.headers.cookie", "req.headers.authorization", "req.headers['x-api-key']"] }, trustProxy: true, bodyLimit: 64 * 1024 * 1024 });
@@ -56,7 +57,7 @@ export async function buildApp() {
     return reply.status(500).send({ code: "server_error", message: "Something went wrong on our side. Nothing was lost; please try again.", details: {} });
   });
   app.setNotFoundHandler(async (req, reply) => {
-    const api = /^\/(v1|docs|healthz|readyz)(\/|$)/.test(req.url);
+    const api = /^\/(v1|docs|healthz|readyz|fonts)(\/|$)/.test(req.url);
     if (req.method === "GET" && !api) {
       const f = await serveEditor(req.url);
       return reply.status(f.status).header("content-type", f.type).header("cache-control", f.cache).send(f.body);
@@ -87,6 +88,7 @@ export async function buildApp() {
   await app.register(async (s) => publicRoutes(s.withTypeProvider<ZodTypeProvider>(), driver));
 
   await app.register(async (s) => adminRoutes(s.withTypeProvider<ZodTypeProvider>()));
+  await app.register(async (s) => fontRoutes(s));
 
   app.addHook("onReady", async () => {
     await ensureQueues(await getBoss());

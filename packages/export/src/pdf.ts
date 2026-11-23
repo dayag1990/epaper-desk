@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { chromium, type Browser } from "playwright";
 import { PDFDocument } from "pdf-lib";
 import type { Article, PageDoc } from "@epaper/core";
-import { renderDocument, renderPage, type Template } from "@epaper/layout";
+import { SERVER_FONT_BASE, installFonts, renderDocument, renderPage, type Template } from "@epaper/layout";
 
 export interface EditionPage { doc: PageDoc; template: Template }
 export interface ScreenPdfOptions {
@@ -42,13 +42,16 @@ export function buildPrintHtml(pages: readonly EditionPage[], articles: readonly
       throw new Error(`mixed page sizes in one PDF (page ${p.doc.page.no} is ${p.doc.page.w_mm}x${p.doc.page.h_mm} mm, first is ${w_mm}x${h_mm} mm)`);
   }
   const canvas = pages[0]!.template.canvas_px;
-  const z = (w_mm * 96) / 25.4 / canvas; // prototype toPrintHTML: zoom = paper px / canvas px
-  const rendered = pages.map((p) => renderPage(p.doc, p.template, articles));
-  const doc = renderDocument(rendered, title);
+  const z = (w_mm * 96) / 25.4 / canvas; // paper px / canvas px
+  const rendered = pages.map((p) => renderPage(p.doc, p.template, articles, { fontBase: SERVER_FONT_BASE }));
+  // Each page is laid out on the canvas (the same layout the editor shows at any zoom) and scaled to paper by a transform,
+  // never by CSS zoom: zoom re-runs line breaking at another size and can move a word to the next line.
+  const doc = renderDocument(rendered.map((r) => ({ ...r, html: `<div class="sheetbox">${r.html}</div>` })), title);
   const extra = `@page{size:${mm(w_mm)} ${mm(h_mm)};margin:0}
 html,body{margin:0;background:#fff}
-.page{zoom:${z.toFixed(6)};height:${((canvas * h_mm) / w_mm).toFixed(3)}px!important;min-height:0!important;overflow:hidden;margin:0;break-after:page;page-break-after:always;-webkit-print-color-adjust:exact;print-color-adjust:exact}
-.page:last-child{break-after:auto;page-break-after:auto}`;
+.sheetbox{width:${mm(w_mm)};height:${mm(h_mm)};overflow:hidden;position:relative;break-after:page;page-break-after:always}
+.sheetbox:last-child{break-after:auto;page-break-after:auto}
+.page{--z:${z.toFixed(6)}!important;height:${((canvas * h_mm) / w_mm).toFixed(3)}px!important;min-height:0!important;overflow:hidden;margin:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}`;
   return { html: doc.replace("</style>", `\n${extra}</style>`), w_mm, h_mm };
 }
 
@@ -80,8 +83,10 @@ async function printPdf(browser: Browser, html: string, w_mm: number, h_mm: numb
   const ctx = await browser.newContext();
   try {
     const page = await ctx.newPage();
+    await installFonts(page);
     await page.setContent(html, { waitUntil: "load" });
-    await page.evaluate(() => (document as Document).fonts.ready.then(() => undefined));
+    // faces load lazily: ask for each one, then wait, so the PDF is never printed with a fallback font
+    await page.evaluate(() => { const faces: FontFace[] = []; document.fonts.forEach((f) => faces.push(f)); return Promise.all(faces.map((f) => f.load())).then(() => document.fonts.ready).then(() => undefined); });
     const raw = await page.pdf({ width: mm(w_mm), height: mm(h_mm), preferCSSPageSize: true, printBackground: true, margin: { top: "0", right: "0", bottom: "0", left: "0" } });
     return await exactBoxes(raw, w_mm, h_mm);
   } finally {

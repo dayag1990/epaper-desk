@@ -13,6 +13,10 @@ export interface FillArgs {
 }
 /** Prototype fillOf(): optionally sets the body size first. Returns the fill ratio (1 = full). */
 export function domFill(a: FillArgs): number {
+  // Never measure with a fallback font: font-display is block, so an unloaded face would give a wrong fill %.
+  document.fonts.forEach((f) => {
+    if (f.status !== "loaded") throw new Error(`Font "${f.family}" is ${f.status}, not loaded: wait for domReady() before measuring.`);
+  });
   const page = document.querySelector(".page") as HTMLElement;
   if (a.fsPx != null) {
     page.dataset.fs = String(a.fsPx);
@@ -100,8 +104,145 @@ export function domFrames(): RawPage {
 
 /** Wait for fonts and images, so measuring happens after layout settles. */
 export async function domReady(): Promise<void> {
+  // A face is fetched lazily, when text first needs it, and fonts.ready can resolve before that starts:
+  // ask for every declared face explicitly, then wait for anything still in flight.
+  const faces: FontFace[] = [];
+  document.fonts.forEach((f) => faces.push(f));
+  await Promise.all(faces.map((f) => f.load().catch(() => null)));
   await document.fonts.ready;
   await Promise.all(
     Array.from(document.images).map((i) => (i.complete ? 0 : new Promise((r) => { i.onload = i.onerror = () => r(0); }))),
   );
+}
+
+export interface DomLine {
+  /** Stable id of the text element: "<item>.<role>[.<paragraph n>]" ("furniture.<class>.<n>" for masthead and strip). */
+  key: string;
+  /** Line number inside that element, 0-based, in visual order. */
+  n: number;
+  /** The words of the line joined by single spaces (as the source text spells them, NFC untouched). */
+  text: string;
+  first: string;
+  /** Box of the line on the template canvas, CSS px relative to the .page top-left (zoom and transform divided out). */
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
+/**
+ * Every line of text on the first .page, as the browser broke it: per text element, split into words with Range rects and
+ * grouped by line. Self-contained (serialised into Chromium). Positions are on the canvas, so they do not depend on the
+ * zoom the page is shown at. Call after domReady().
+ */
+export function domLines(): DomLine[] {
+  const page = document.querySelector(".page") as HTMLElement;
+  const pr = page.getBoundingClientRect();
+  const k = pr.width / page.offsetWidth; // transform scale of the page (editor zoom, print scale)
+  const out: DomLine[] = [];
+  const els: { el: Element; key: string }[] = [];
+  page.querySelectorAll(".mast .name, .mast .tag, .strip > *").forEach((el, i) => els.push({ el, key: `furniture.${el.className || el.tagName.toLowerCase()}.${i}` }));
+  page.querySelectorAll<HTMLElement>(".story").forEach((s) => {
+    const item = s.dataset.item ?? "";
+    s.querySelectorAll(".kicker, .head, .sub").forEach((el) => els.push({ el, key: `${item}.${el.className.split(" ")[0]}` }));
+    s.querySelectorAll(".body p").forEach((el, i) => els.push({ el, key: `${item}.body.${i}` }));
+  });
+  for (const { el, key } of els) {
+    const tn = Array.from(el.childNodes).find((c) => c.nodeType === 3) as Text | undefined;
+    if (!tn) continue;
+    // one Range per grapheme cluster, so a break inside a "word" (after a hyphen, say) shows up as a line change too
+    type Cur = { text: string; first: string; sp: boolean; x0: number; y0: number; x1: number; y1: number };
+    let cur: Cur | null = null;
+    let n = 0;
+    const flush = () => {
+      if (cur) out.push({ key, n: n++, text: cur.text, first: cur.first, x0: cur.x0, y0: cur.y0, x1: cur.x1, y1: cur.y1 });
+      cur = null;
+    };
+    let space = false;
+    for (const g of new Intl.Segmenter("ta", { granularity: "grapheme" }).segment(tn.data)) {
+      const at = g.index;
+      const pos = at + g.segment.length;
+      if (/^\s+$/.test(g.segment)) { space = true; continue; }
+      const r = document.createRange();
+      r.setStart(tn, at);
+      r.setEnd(tn, pos);
+      const b = r.getClientRects()[0];
+      if (!b) continue;
+      const box = { x0: (b.left - pr.left) / k, y0: (b.top - pr.top) / k, x1: (b.right - pr.left) / k, y1: (b.bottom - pr.top) / k };
+      if (cur && Math.abs(box.y0 - cur.y0) > (box.y1 - box.y0) * 0.4) flush();
+      if (!cur) cur = { text: "", first: "", sp: false, ...box };
+      if (space && cur.text) { cur.text += " "; cur.sp = true; }
+      space = false;
+      cur.text += g.segment;
+      if (!cur.sp) cur.first += g.segment;
+      cur.x0 = Math.min(cur.x0, box.x0);
+      cur.x1 = Math.max(cur.x1, box.x1);
+      cur.y1 = Math.max(cur.y1, box.y1);
+    }
+    flush();
+  }
+  return out;
+}
+
+export interface SpaceStat {
+  /** Column width in px (canvas). */
+  col: number;
+  /** Mean word gap of the line / the natural space of the font (1 = no stretching). */
+  growth: number;
+  /** Characters on the line, spaces included. */
+  chars: number;
+  /** Unused part of the line, 0..1 of the column (ragged-right look). */
+  rag: number;
+}
+/**
+ * How the body text sits in its columns: for every line of every body paragraph except the last line of a paragraph,
+ * the word-space growth (justified text stretches spaces to fill the line), the characters per line and the rag.
+ * Self-contained (serialised into Chromium); call after domReady().
+ */
+export function domSpaceStats(): SpaceStat[] {
+  const out: SpaceStat[] = [];
+  document.querySelectorAll<HTMLElement>(".body").forEach((b) => {
+    const cs = getComputedStyle(b);
+    const probe = document.createElement("span");
+    probe.style.cssText = "position:absolute;white-space:pre;visibility:hidden";
+    probe.style.font = cs.font;
+    probe.style.fontVariationSettings = cs.fontVariationSettings;
+    probe.style.fontFeatureSettings = cs.fontFeatureSettings;
+    b.appendChild(probe);
+    probe.textContent = "அ அ";
+    const w2 = probe.getBoundingClientRect().width;
+    probe.textContent = "அஅ";
+    const space = w2 - probe.getBoundingClientRect().width;
+    b.removeChild(probe);
+    const n = parseInt(cs.columnCount, 10) || 1;
+    const col = (b.offsetWidth - (parseFloat(cs.columnGap) || 0) * (n - 1)) / n;
+    const k = b.getBoundingClientRect().width / b.offsetWidth; // transform scale
+    b.querySelectorAll("p").forEach((p) => {
+      const tn = p.firstChild as Text | null;
+      if (!tn) return;
+      const re = /\S+/g;
+      let m: RegExpExecArray | null;
+      const lines: { x0: number; x1: number; top: number; len: number }[][] = [];
+      while ((m = re.exec(tn.data))) {
+        const r = document.createRange();
+        r.setStart(tn, m.index);
+        r.setEnd(tn, m.index + m[0].length);
+        const c = r.getClientRects()[0]!;
+        const w = { x0: c.left / k, x1: c.right / k, top: Math.round(c.top / k), len: m[0].length };
+        const l = lines[lines.length - 1];
+        if (l && Math.abs(l[0]!.top - w.top) < 4 && w.x0 >= l[l.length - 1]!.x0) l.push(w);
+        else lines.push([w]);
+      }
+      lines.forEach((l, i) => {
+        if (i === lines.length - 1 || l.length < 2) return;
+        const gaps = l.slice(1).map((w, j) => w.x0 - l[j]!.x1);
+        out.push({
+          col: Math.round(col),
+          growth: gaps.reduce((a, g) => a + g, 0) / gaps.length / space,
+          chars: l.reduce((a, w) => a + w.len, 0) + l.length - 1,
+          rag: (col - (l[l.length - 1]!.x1 - l[0]!.x0)) / col,
+        });
+      });
+    });
+  });
+  return out;
 }

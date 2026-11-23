@@ -1,10 +1,11 @@
 import { chromium, type Browser, type Page } from "playwright";
 import { LayoutSnapshotSchema, type Article, type LayoutSnapshot, type PageDoc } from "@epaper/core";
-import { domFill, domFrames, domReady, type RawFrame } from "./dom.js";
+import { domFill, domFrames, domLines, domReady, domSpaceStats, type DomLine, type RawFrame, type SpaceStat } from "./dom.js";
 import { fitBodySizeAsync, lowResCheck, type FitResult } from "./fit.js";
 import { renderDocument, renderPage, type RenderOptions } from "./render.js";
+import { SERVER_FONT_BASE, installFonts } from "./fonts.js";
 import type { Template } from "./template.js";
-import { pxToPt, ptToPx, round } from "./units.js";
+import { pxToPt, round, storedBodyPx } from "./units.js";
 
 export interface LowResWarning {
   item: string;
@@ -43,7 +44,12 @@ export class LayoutEngine {
   static async launch(): Promise<LayoutEngine> {
     const browser = await chromium.launch();
     const ctx = await browser.newContext({ viewport: { width: 1600, height: 1200 }, deviceScaleFactor: 1 });
-    return new LayoutEngine(browser, await ctx.newPage());
+    return LayoutEngine.fromPage(browser, await ctx.newPage());
+  }
+  /** An engine on a page of a browser somebody else owns (the worker's pool). Installs the font route. */
+  static async fromPage(browser: Browser, page: Page): Promise<LayoutEngine> {
+    await installFonts(page);
+    return new LayoutEngine(browser, page);
   }
   async close(): Promise<void> {
     await this.browser.close();
@@ -51,9 +57,21 @@ export class LayoutEngine {
 
   /** Load one page into Chromium and wait until fonts and images settle. */
   async load(doc: PageDoc, t: Template, articles: readonly Article[] = [], opts: RenderOptions = {}): Promise<void> {
-    const r = renderPage(doc, t, articles, opts);
+    const r = renderPage(doc, t, articles, { fontBase: SERVER_FONT_BASE, ...opts });
     await this.page.setContent(renderDocument([r], `page ${doc.page.no}`), { waitUntil: "load" });
     await this.page.evaluate(domReady);
+  }
+
+  /** Every line of text of the page loaded last, as broken at editor zoom `zoom` (a transform: it must not matter). */
+  async lines(zoom = 1): Promise<DomLine[]> {
+    await this.page.evaluate((z) => document.querySelector<HTMLElement>(".page")!.style.setProperty("--z", String(z)), zoom);
+    return this.page.evaluate(domLines);
+  }
+
+  /** Word-space growth, characters per line and rag of the body text of the page loaded last (see domSpaceStats). */
+  async spaceStats(extraCss = ""): Promise<SpaceStat[]> {
+    if (extraCss) await this.page.addStyleTag({ content: extraCss });
+    return this.page.evaluate(domSpaceStats);
   }
 
   private async fillAt(doc: PageDoc, t: Template, px?: number): Promise<number> {
@@ -64,7 +82,7 @@ export class LayoutEngine {
   async measure(doc: PageDoc, t: Template, articles: readonly Article[] = []): Promise<FitReport> {
     await this.load(doc, t, articles);
     const fill = await this.fillAt(doc, t);
-    const px = round(ptToPx(doc.page.body_pt, t), 3);
+    const px = storedBodyPx(doc.page.body_pt, t);
     return this.report(doc, t, fill, px, 0);
   }
 

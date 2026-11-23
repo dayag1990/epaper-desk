@@ -1,0 +1,199 @@
+{
+  "id": "front_a",
+  "set": "broadsheet-ta",
+  "name": "Tamil demo broadsheet (front_a)",
+  "demo_default": true,
+  "notice": "DEMO DEFAULT template for the fictional Tamil paper தென்பொதிகை. Not any client's template; replace with the paper's own before production.",
+  "role": "front",
+  "max_stories": 6,
+  "size": {
+    "id": "broadsheet",
+    "w_mm": 381,
+    "h_mm": 578
+  },
+  "canvas_px": 1520,
+  "pad": {
+    "top": 30,
+    "right": 34,
+    "bottom": 34,
+    "left": 34
+  },
+  "columns": 8,
+  "gap": {
+    "row_px": 20,
+    "col_px": 24
+  },
+  "body": {
+    "default_px": 14,
+    "start_px": 14.5,
+    "min_px": 10.5,
+    "max_px": 20,
+    "step_px": 0.25,
+    "line_height": 1.55,
+    "col_gap_px": 22,
+    "span_per_col": 2
+  },
+  "furniture": {
+    "masthead": "தென்பொதிகை",
+    "tagline": "மாதிரி இதழ் · டெமோ",
+    "strip": [
+      "டெமோ பதிப்பு",
+      "நவம்பர் 24, 2026",
+      "8 பக்கங்கள்"
+    ],
+    "page_label": "பக்கம்"
+  },
+  "fonts": {
+    "body": "\"Noto Serif Tamil\",serif",
+    "head": "\"Anek Tamil\",\"Noto Serif Tamil\",sans-serif",
+    "faces": [
+      {
+        "family": "Noto Serif Tamil",
+        "src": "noto-serif-tamil/NotoSerifTamil[wdth,wght].ttf",
+        "weight": "100 900",
+        "stretch": "75% 125%"
+      },
+      {
+        "family": "Anek Tamil",
+        "src": "anek-tamil/AnekTamil[wdth,wght].ttf",
+        "weight": "100 900",
+        "stretch": "75% 125%"
+      }
+    ]
+  },
+  "colors": {
+    "ink": "#141414",
+    "red": "#c1121f",
+    "blue": "#12357a",
+    "rule": "#1a1a1a",
+    "paper": "#fbfaf6",
+    "mast": "#c1121f"
+  },
+  "masthead_px": {
+    "name": 96,
+    "tag": 20
+  },
+  "styles": {
+    "head": "Story-head",
+    "sub": "Story-sub-head",
+    "body": "Story-body"
+  },
+  "idml": {
+    "font_styles": {
+      "Masthead": "ExtraBold",
+      "Strip": "Bold",
+      "Story-kicker": "Bold",
+      "Story-head": "ExtraBold",
+      "Story-sub-head": "Bold",
+      "Story-body": "Regular"
+    }
+  },
+  "section_order": [
+    "முதல் பக்கம்",
+    "தமிழ்நாடு",
+    "சென்னை",
+    "இந்தியா",
+    "உலகம்",
+    "வணிகம்",
+    "விளையாட்டு",
+    "சினிமா"
+  ],
+  "date_format": {
+    "locale": "ta",
+    "pattern": "{month} {day}, {year}"
+  },
+  "slots": [
+    {
+      "id": "story_col_span-5-1",
+      "span": 5,
+      "cols": 2,
+      "kind": "story",
+      "words_min": 120,
+      "words_max": 9999,
+      "image": true
+    },
+    {
+      "id": "story_col_span-3-2",
+      "span": 3,
+      "cols": 2,
+      "kind": "story",
+      "words_min": 80,
+      "words_max": 300,
+      "image": true
+    },
+    {
+      "id": "story_col_span-3-3",
+      "span": 3,
+      "cols": 2,
+      "kind": "story",
+      "words_min": 60,
+      "words_max": 260,
+      "image": true
+    },
+    {
+      "id": "story_col_span-2-4",
+      "span": 2,
+      "cols": 1,
+      "kind": "story",
+      "words_min": 0,
+      "words_max": 140,
+      "image": false
+    },
+    {
+      "id": "story_col_span-3-5",
+      "span": 3,
+      "cols": 2,
+      "kind": "story",
+      "words_min": 60,
+      "words_max": 260,
+      "image": false
+    },
+    {
+      "id": "story_col_span-2-6",
+      "span": 2,
+      "cols": 1,
+      "kind": "story",
+      "words_min": 0,
+      "words_max": 120,
+      "image": false
+    },
+    {
+      "id": "sidebar",
+      "span": 2,
+      "cols": 1,
+      "kind": "side",
+      "words_min": 0,
+      "words_max": 140,
+      "image": false
+    },
+    {
+      "id": "feature-1",
+      "span": 6,
+      "cols": 3,
+      "kind": "feature",
+      "words_min": 150,
+      "words_max": 9999,
+      "image": true
+    },
+    {
+      "id": "editorial",
+      "span": 8,
+      "cols": 4,
+      "kind": "edit",
+      "words_min": 100,
+      "words_max": 9999,
+      "image": false
+    },
+    {
+      "id": "adverts-1",
+      "span": 8,
+      "cols": 1,
+      "kind": "ad",
+      "words_min": 0,
+      "words_max": 0,
+      "image": true
+    }
+  ],
+  "css_extra": "\n/* ---- Tamil typography (templates/broadsheet-ta). One CSS for editor, server PDF and e-paper. ---- */\n.page,.page *{letter-spacing:0!important;font-synthesis:none}\n.page{font-weight:400;font-stretch:100%;font-variation-settings:\"wght\" 400,\"wdth\" 100;font-kerning:normal;font-variant-ligatures:common-ligatures;font-feature-settings:\"ccmp\" 1,\"locl\" 1,\"kern\" 1,\"liga\" 1;text-rendering:geometricPrecision}\n.mast .name,.strip .sec,.head{font-weight:800;font-stretch:100%;font-variation-settings:\"wght\" 800,\"wdth\" 100}\n.kicker,.sub,.strip,.mast .tag{font-weight:700;font-variation-settings:\"wght\" 700,\"wdth\" 100}\n.strip .sec{font-weight:800;font-variation-settings:\"wght\" 800,\"wdth\" 100}\n.mast .name{line-height:1.2;padding-bottom:4px}\n.mast .tag,.strip{line-height:1.6}\n.head{line-height:1.25;font-size:calc(min(17px + var(--span,2) * 4px, 42px) * var(--hs,1))}\n.kicker{font-size:19px;line-height:1.5;padding:3px 14px 3px}\n.sub{font-size:18px;line-height:1.45;margin-bottom:8px}\n.body{line-height:1.55;text-align:left}\n.body p{margin:0 0 .4em}\n.body p+p{text-indent:1.1em}\n.k-edit .kicker{font-size:24px}\n",
+  "lang": "ta"
+}

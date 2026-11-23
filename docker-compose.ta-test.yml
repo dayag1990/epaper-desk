@@ -1,0 +1,37 @@
+# Test-only override for tests/ta-type/stack.test.ts. Use with:
+#   BACKUP_ROOT=/srv/epaper/ta-tmp-root docker compose -p tmp-ta -f docker-compose.yml -f docker-compose.ta-test.yml up -d postgres api worker demo-api demo-worker
+# A throwaway project (tmp-ta): its own containers, volume, network, images (:ta), files folder, WAL folder and port 127.0.0.1:8111,
+# so the live project is never touched. The demo sidecars serve the Tamil demo site (TA_SITE, default fixtures/demo-site-ta/site).
+services:
+  postgres:
+    container_name: tmp-ta-postgres
+  api:
+    image: tmp-ta-api:ta
+    container_name: tmp-ta-api
+    ports: !override ["127.0.0.1:8111:8100"]
+    volumes: !override ["/srv/epaper/files-ta-tmp:/files"]
+    extra_hosts: ["host.docker.internal:host-gateway"]
+  worker:
+    image: tmp-ta-worker:ta
+    container_name: tmp-ta-worker
+    volumes: !override ["/srv/epaper/files-ta-tmp:/files"]
+    extra_hosts: ["host.docker.internal:host-gateway"]
+  # The site's pages link to http://127.0.0.1:8190/..., so each container needs that address to answer (same trick as docker-compose.join-test.yml).
+  demo-api:
+    image: tmp-ta-api:ta
+    container_name: tmp-ta-demo-api
+    network_mode: "service:api"
+    depends_on: { api: { condition: service_healthy } }
+    volumes: ["${TA_SITE:-./fixtures/demo-site-ta/site}:/site:ro", "./tests/join/static-site.mjs:/srv/static-site.mjs:ro"]
+    command: ["node", "/srv/static-site.mjs"]
+    user: "1001:1001"
+    restart: "no"
+  demo-worker:
+    image: tmp-ta-api:ta
+    container_name: tmp-ta-demo-worker
+    network_mode: "service:worker"
+    depends_on: { worker: { condition: service_healthy } }
+    volumes: ["${TA_SITE:-./fixtures/demo-site-ta/site}:/site:ro", "./tests/join/static-site.mjs:/srv/static-site.mjs:ro"]
+    command: ["node", "/srv/static-site.mjs"]
+    user: "1001:1001"
+    restart: "no"

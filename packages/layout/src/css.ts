@@ -1,16 +1,34 @@
 import type { Template } from "./template.js";
 
+/** Where the editor (same origin as the API) fetches the template fonts from. The server render passes its own base (see fonts.ts). */
+export const DEFAULT_FONT_BASE = "/fonts";
+export interface CssOptions {
+  /** URL prefix the font files are served under; the face `src` is appended to it. */
+  fontBase?: string;
+}
+
+const FORMAT: Record<string, string> = { ttf: "truetype", otf: "opentype", woff: "woff", woff2: "woff2" };
+const fontUrl = (src: string, base: string): string =>
+  /^(?:[a-z][a-z0-9+.-]*:|\/)/i.test(src) ? src : `${base.replace(/\/$/, "")}/${src.split("/").map(encodeURIComponent).join("/")}`;
+
 /** The paperCss style of the prototype, parameterised by template tokens. Same CSS for editor and server. */
-export function paperCss(t: Template): string {
+export function paperCss(t: Template, opts: CssOptions = {}): string {
   const c = t.colors;
+  const base = opts.fontBase ?? DEFAULT_FONT_BASE;
+  // font-display:block: text is never set in a fallback font, so nothing is measured with the wrong face.
   const faces = t.fonts.faces
-    .map((f) => `@font-face{font-family:"${f.family}";src:url("${f.src}") format("woff2");${f.weight ? `font-weight:${f.weight};` : ""}font-display:block}`)
+    .map((f) => {
+      const ext = f.src.split(".").pop()!.toLowerCase();
+      return `@font-face{font-family:"${f.family}";src:url("${fontUrl(f.src, base)}") format("${f.format ?? FORMAT[ext] ?? "truetype"}");${f.weight ? `font-weight:${f.weight};` : ""}${f.stretch ? `font-stretch:${f.stretch};` : ""}font-display:block}`;
+    })
     .join("\n");
   return `${faces}
 /* ---------- newspaper page (shared by editor and server) ---------- */
 .page{--ink:${c.ink};--red:${c.red};--blue:${c.blue};--rule:${c.rule};--mast:${c.mast};--fs:${t.body.default_px}px;
   width:${t.canvas_px}px;box-sizing:border-box;padding:${t.pad.top}px ${t.pad.right}px ${t.pad.bottom}px ${t.pad.left}px;background:${c.paper};color:var(--ink);
-  font-family:${t.fonts.body};}
+  font-family:${t.fonts.body};
+  /* no hyphenation in any script, and the same line-breaking rules in every context */
+  hyphens:none;-webkit-hyphens:none;line-break:strict;word-break:normal;overflow-wrap:normal}
 .page *{box-sizing:border-box}
 .mast{background:var(--mast);color:#fff;padding:18px 28px 12px;display:flex;align-items:flex-end;justify-content:space-between;gap:24px}
 .mast .name{font-family:${t.fonts.head};font-weight:800;font-size:${t.masthead_px.name}px;line-height:1.05;letter-spacing:-1px;min-width:200px}
@@ -39,7 +57,10 @@ export function paperCss(t: Template): string {
 .k-edit .kicker{background:var(--blue);font-size:26px}
 .k-ad{border-top:0;padding-top:0}
 .k-ad .fig{margin:0;border:1px solid #999}
-.page{zoom:var(--z,1)}
+/* Zoom is a transform, never CSS zoom or a font-size change: the page is always LAID OUT on the template canvas (1520 px wide),
+   so line breaks and the fill % are the same at every editor zoom and in the PDF. Whoever shows the page at another size
+   gives its host element the scaled width and height (the editor does; the print sheet does, see export/pdf.ts). */
+.page{transform:scale(var(--z,1));transform-origin:0 0}
 .fig .warn{position:absolute;left:8px;top:8px;background:#e11d2e;color:#fff;font:800 13px system-ui,sans-serif;padding:4px 8px;border-radius:4px}
 .fig.empty{border:3px dashed #8d8777;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;
   font:800 17px/1.5 system-ui,sans-serif;color:#5c5648;padding:10px}

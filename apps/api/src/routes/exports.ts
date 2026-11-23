@@ -19,7 +19,6 @@ export function exportRoutes(app: App, driver: FileDriver) {
     const ed = await prisma.edition.findFirst({ where: { id: req.params.id, paper_id: p.paper_id } });
     if (!ed) throw notFound("That edition");
     const { format } = req.body;
-    if (format === "idml") throw new ApiError(501, "not_built", "The InDesign (IDML) export is not part of this release yet.");
     if (format === "pdf_press") throw new ApiError(501, "not_built", "Press PDF needs the client's press profile and is phase 2. Use the screen PDF.");
     const pages = await prisma.page.count({ where: { edition_id: ed.id } });
     if (!pages) throw new ApiError(409, "no_pages", "This edition has no pages yet. Run auto-plan first.");

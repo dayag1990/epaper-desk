@@ -126,7 +126,6 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     }
     case "POST /v1/editions/:id/exports": {
       if (!need(...WRITE)) return;
-      if (b.format === "idml") return err(res, 501, "not_built", "The InDesign (IDML) export is not part of this release yet.");
       const list = st.exports.get(id)!; const x: any = { id: randomUUID(), format: b.format, status: "running", url: null };
       list.unshift(x);
       setTimeout(() => { x.status = "done"; x.url = `/v1/exports/${x.id}/download`; if (b.format === "pdf_screen") st.readers.set(id, { id, status: "ready", version: 1, publish_at: null }); }, 600);
