@@ -117,7 +117,7 @@ export function epaperRoutes(app: App, driver: FileDriver) {
     const at = req.body.at ? new Date(req.body.at) : new Date();
     if (at.getTime() > Date.now() + 1000) {
       await prisma.epEdition.update({ where: { id: e.id }, data: { status: "scheduled", publish_at: at } });
-      await enqueue("epaper.publish", p.paper_id, { ep_edition_id: e.id }, `publish:${e.id}:${at.getTime()}`, Math.ceil((at.getTime() - Date.now()) / 1000));
+      await enqueue("epaper.publish", p.paper_id, { ep_edition_id: e.id, base: hostOf(req) }, `publish:${e.id}:${at.getTime()}`, Math.ceil((at.getTime() - Date.now()) / 1000));
       return { status: "scheduled", publish_at: at };
     }
     await prisma.epEdition.update({ where: { id: e.id }, data: { status: "published", publish_at: at, published_at: new Date() } });

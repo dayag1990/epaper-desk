@@ -101,6 +101,14 @@ export function editionRoutes(app: App) {
 
   app.get("/v1/pages/:id", { schema: { tags: ["pages"], params: Id }, preHandler: requireRole() }, async (req) => pageView(await loadPage(req.params.id, req.principal!.paper_id)));
 
+  // D4 LayoutSnapshot (this one page) of the current version, once the worker has laid it out
+  app.get("/v1/pages/:id/snapshot", { schema: { tags: ["pages"], params: Id }, preHandler: requireRole() }, async (req) => {
+    const page = await loadPage(req.params.id, req.principal!.paper_id);
+    const v = await prisma.pageVersion.findUnique({ where: { page_id_rev: { page_id: page.id, rev: page.rev } } });
+    if (!v?.snapshot) throw new ApiError(404, "not_ready", "The layout snapshot for this version is not ready yet.");
+    return { rev: page.rev, fit_pct: v.fit_pct, snapshot: v.snapshot };
+  });
+
   app.put("/v1/pages/:id", {
     schema: { tags: ["pages"], params: Id, body: z.object({ doc: z.any(), rev: z.number().int().min(0) }) },
     preHandler: requireRole(...WRITE_ROLES),

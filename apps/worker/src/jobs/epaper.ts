@@ -8,7 +8,6 @@ import { prisma } from "../db.js";
 import { day, driver, emitWebhook, loadArticles, storeFile, type JobCtx } from "../ctx.js";
 import type { Envelope } from "../main.js";
 
-const hostBase = () => process.env.PUBLIC_BASE_URL ?? "";
 
 async function withTmp<T>(fn: (dir: string) => Promise<T>): Promise<T> {
   const dir = await mkdtemp(path.join(tmpdir(), "epaper-"));
@@ -86,7 +85,7 @@ export async function epaperReplacePage(e: Envelope) {
   await prisma.epEdition.update({ where: { id: ep.id }, data: { version: { increment: 1 } } });
   if (ep.status === "published") {
     const paper = await prisma.paper.findUniqueOrThrow({ where: { id: e.paper_id } });
-    await emitWebhook(e.paper_id, "page.replaced", { event: "page.replaced", paper: paper.slug, edition: day(ep.date), page: no, url: `${hostBase()}/v1/public/editions/${ep.id}/pages` });
+    await emitWebhook(e.paper_id, "page.replaced", { event: "page.replaced", paper: paper.slug, edition: day(ep.date), page: no, url: `${process.env.PUBLIC_BASE_URL ?? "http://127.0.0.1:8100"}/v1/public/editions/${ep.id}/pages` });
   }
 }
 
@@ -97,7 +96,7 @@ export async function epaperPublish(e: Envelope) {
   await prisma.epEdition.update({ where: { id: ep.id }, data: { status: "published", published_at: new Date() } });
   const paper = await prisma.paper.findUniqueOrThrow({ where: { id: e.paper_id } });
   const n = await prisma.epPage.count({ where: { ep_edition_id: ep.id, rolled_back: false } });
-  await emitWebhook(e.paper_id, "edition.published", { event: "edition.published", paper: paper.slug, edition: day(ep.date), pages: n, url: `${hostBase()}/v1/public/editions/${ep.id}/pages` });
+  await emitWebhook(e.paper_id, "edition.published", { event: "edition.published", paper: paper.slug, edition: day(ep.date), pages: n, url: `${(e.payload.base as string) ?? ""}/v1/public/editions/${ep.id}/pages` });
 }
 
 /** Send one webhook, signed. Failures retry with backoff; after the last try it is marked failed and the job goes to the dead letters. */
