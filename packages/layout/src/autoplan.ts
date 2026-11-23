@@ -21,6 +21,10 @@ export interface AutoPlanOptions {
   fit?: FitOptions;
   /** Cap the number of full re-fit passes (safety). */
   maxPasses?: number;
+  /** Upper bound on page evaluations (each = one real render+fit) the balancing search may spend. Default 40. */
+  repairBudget?: number;
+  /** Fill ratio the balancer aims for on every page (the band is 0.85..1). Default 0.9. */
+  targetFill?: number;
 }
 export interface PlannedPage {
   doc: PageDoc;
@@ -31,6 +35,10 @@ export interface PlannedPage {
 export interface PlanResult {
   pages: PlannedPage[];
   unplaced: string[]; // article ids that could not be placed (never silently dropped)
+  /** Plain-words reason for every id in `unplaced`. */
+  unplaced_reasons?: { id: string; reason: string }[];
+  /** How many real page evaluations the balancer spent (bounded by repairBudget). */
+  evaluations?: number;
   elapsed_ms: number;
 }
 
@@ -70,13 +78,16 @@ function chooseSlot(kind: PageItem["kind"], w: number, hasImage: boolean, used: 
   return cand[0] ?? null;
 }
 
-function toItem(a: Article, pageNo: number, n: number, t: Template, used: Set<string>): PageItem {
+function toItem(a: Article, pageNo: number, n: number, t: Template, used: Set<string>, spanOv?: number): PageItem {
   const w = words(a);
   const hinted = kindOfHint(a.layout_hint?.slot);
   const kind: PageItem["kind"] = hinted && hinted !== "ad" ? hinted : "story";
   const hasImage = a.images.length > 0;
   let slot: string, span: number, cols: number;
-  if (a.layout_hint && hinted) {
+  if (spanOv != null && !(a.layout_hint && hinted)) {
+    span = Math.min(t.columns, Math.max(1, spanOv));
+    slot = `story_col_span-${span}-${n}`; cols = span;
+  } else if (a.layout_hint && hinted) {
     slot = a.layout_hint.slot;
     span = Math.min(t.columns, Math.max(1, a.layout_hint.span || defaultSpan({ kind, slot }, t.columns)));
     cols = span;
@@ -134,11 +145,57 @@ function buildDoc(pageNo: number, t: Template, items: PageItem[], opts: AutoPlan
   return PageDocSchema.parse(doc);
 }
 
+/** Rough height of a story in "word equivalents": copy + headline/kicker/sub furniture + photo. Only used to split pages; the real fit loop decides. */
+export function estimateUnits(a: Article): number {
+  return words(a) + 55 + (a.images.length ? 90 : 0);
+}
+
 /**
- * Auto-plan: articles -> PageDocs for N pages. Rule-based and deterministic (no AI, no clock, no randomness):
- * sort by hint order / priority, group by section, fill pages by word budget, pick a template variant by
- * story count, fit each page, and push the last story to the next page while a page overflows.
- * The last page keeps what is left and reports its overflow.
+ * Split an ordered queue into `n` contiguous parts whose estimated loads are as even as possible
+ * (front page counts as a little smaller: masthead). Cutting inside a section costs a little, so
+ * sections stay together unless balance needs the cut. Exact DP, O(n^2 * parts), deterministic.
+ */
+export function partitionQueue(units: readonly number[], sections: readonly string[], n: number, caps: readonly number[]): number[] {
+  const N = units.length;
+  const pre = [0];
+  for (const u of units) pre.push(pre[pre.length - 1]! + u);
+  const target = pre[N]! / caps.reduce((x, y) => x + y, 0);
+  const splitCost = (0.12 * target) ** 2;
+  const cut = (i: number) => (i > 0 && i < N && sections[i - 1] === sections[i] ? splitCost : 0);
+  const INF = Infinity;
+  const best: number[][] = Array.from({ length: n + 1 }, () => new Array<number>(N + 1).fill(INF));
+  const from: number[][] = Array.from({ length: n + 1 }, () => new Array<number>(N + 1).fill(0));
+  best[0]![0] = 0;
+  const minPer = N >= n ? 1 : 0;
+  for (let p = 1; p <= n; p++)
+    for (let i = 0; i <= N; i++)
+      for (let j = 0; j <= i - minPer; j++) {
+        const b = best[p - 1]![j]!;
+        if (b === INF) continue;
+        const load = (pre[i]! - pre[j]!) / caps[p - 1]!;
+        const c = b + (load - target) ** 2 + (p < n ? cut(i) : 0);
+        if (c < best[p]![i]!) { best[p]![i] = c; from[p]![i] = j; }
+      }
+  const ends: number[] = [];
+  let i = N;
+  for (let p = n; p >= 1; p--) { ends.unshift(i); i = from[p]![i]!; }
+  return ends; // exclusive end index of each part
+}
+
+/** Penalty of one page for the search: 0 inside the band, growing below the target and steeply on overflow. */
+const penalty = (fill: number, target: number): number => (fill > 1 ? 1 + 20 * (fill - 1) : fill < target ? (target - fill) * 2 : 0);
+
+/**
+ * Auto-plan: articles -> PageDocs for N pages. Deterministic (no AI, no clock, no randomness).
+ *  1. sort by hint order / priority, group by section (sections in order of first appearance);
+ *  2. estimate each story's height cheaply and cut the queue into N contiguous parts with even estimated
+ *     load (lead stories land on page 1, sections stay together, the last section ends up last);
+ *  3. run the real fit loop per page; a page left under the target is grown within the template's size limits;
+ *  4. bounded local repair on pages that miss the 85..100 % band: move or swap a story with the neighbour page,
+ *     then change a story's span by one column. Every evaluation is a real render, capped by `repairBudget`.
+ * With bySection (the default when `pages` is not given) every section keeps its own page and only the
+ * size / span repairs run. Whatever still overflows is reported, never hidden; an article that cannot fit
+ * on any page even alone goes to `unplaced` with a reason.
  */
 export async function autoPlan(
   engine: LayoutEngine,
@@ -156,44 +213,157 @@ export async function autoPlan(
   const nPages = Math.max(1, opts.pages ?? secOrder.length);
   const queue: Article[] = [];
   for (const s of secOrder) queue.push(...sorted.filter((a) => sectionKey(a) === s));
+  const qIndex = new Map(queue.map((a, i) => [a.id, i]));
+  const byQ = (x: Article, y: Article) => qIndex.get(x.id)! - qIndex.get(y.id)!;
+  const targetFill = opts.targetFill ?? 0.9;
 
-  const totalWords = queue.reduce((n, a) => n + words(a), 0);
-  const target = totalWords / nPages;
-  const result: PlannedPage[] = [];
   const unplaced: string[] = [];
-
-  for (let p = 1; p <= nPages; p++) {
-    const last = p === nPages;
-    let cur: Article[] = [];
-    let w = 0;
-    while (queue.length) {
-      const a = queue[0]!;
-      if (!last && cur.length) {
-        if (bySection ? sectionKey(a) !== sectionKey(cur[0]!) : w + words(a) / 2 > target * 1.05 || (sectionKey(a) !== sectionKey(cur[cur.length - 1]!) && w >= target * 0.7)) break;
-      }
-      cur.push(queue.shift()!);
-      w += words(a);
+  const reasons: { id: string; reason: string }[] = [];
+  const giveUp = (a: Article, pct: number) => {
+    unplaced.push(a.id);
+    reasons.push({ id: a.id, reason: `"${a.headline}" is too long for any page: alone it overflows a whole page by ${pct}% even at the smallest text size. Cut it or run it over two pages.` });
+  };
+  // 3: real evaluation of a page, cached
+  const spanOv = new Map<string, number>(); // article id -> span chosen by the repair
+  let evaluations = 0;
+  const budget = opts.repairBudget ?? 40;
+  type Ev = { t: Template; fit: FitReport };
+  const cache = new Map<string, Ev>();
+  const evalPage = async (p: number, list: Article[]): Promise<Ev> => {
+    const key = `${p}|${list.map((a) => `${a.id}:${spanOv.get(a.id) ?? ""}`).join(",")}`;
+    const hit = cache.get(key);
+    if (hit) return hit;
+    evaluations++;
+    const section = list[0] ? sectionKey(list[0]) : "";
+    const t = pickVariant([...templates], p, list.length + (opts.ads?.filter((x) => x.page === p).length ?? 0));
+    const used = new Set<string>();
+    const items = list.map((a, i) => toItem(a, p, i + 1, t, used, spanOv.get(a.id)));
+    (opts.ads ?? []).filter((x) => x.page === p).forEach((ad, i) =>
+      items.push({ id: `it_p${p}ad${i + 1}`, kind: "ad", slot: `adverts-${i + 1}`, span: t.columns, cols: 1, image: { asset_id: ad.asset_id, ratio: ad.ratio ?? 9, cutout: false, focal: [0.5, 0.5] } }));
+    const doc = buildDoc(p, t, items, opts, section);
+    let fit = await engine.fit(doc, t, articles, opts.fit);
+    if (!fit.overflow && list.length && fit.fill < targetFill) {
+      const grown = await engine.fitGrow(doc, t, articles, targetFill);
+      if (!grown.overflow && grown.fill > fit.fill) fit = grown;
     }
-    // an empty page (fewer articles than pages) is still a page; planning never invents content
-    const section = cur[0] ? sectionKey(cur[0]) : "";
-    const make = (list: Article[]) => {
-      const t = pickVariant([...templates], p, list.length + (opts.ads?.filter((x) => x.page === p).length ?? 0));
-      const used = new Set<string>();
-      const items = list.map((a, i) => toItem(a, p, i + 1, t, used));
-      (opts.ads ?? []).filter((x) => x.page === p).forEach((ad, i) =>
-        items.push({ id: `it_p${p}ad${i + 1}`, kind: "ad", slot: `adverts-${i + 1}`, span: t.columns, cols: 1, image: { asset_id: ad.asset_id, ratio: ad.ratio ?? 9, cutout: false, focal: [0.5, 0.5] } }));
-      return { t, doc: buildDoc(p, t, items, opts, section) };
-    };
-    let built = make(cur);
-    let fit = await engine.fit(built.doc, built.t, articles, opts.fit);
-    let passes = 0;
-    while (fit.overflow && !last && !bySection && cur.length > 1 && passes++ < (opts.maxPasses ?? 40)) {
-      queue.unshift(cur.pop()!);
-      built = make(cur);
-      fit = await engine.fit(built.doc, built.t, articles, opts.fit);
+    const ev = { t, fit };
+    cache.set(key, ev);
+    return ev;
+  };
+  // a story far bigger than an average page is tried alone first; if it cannot fit even there it is set aside up front
+  if (!bySection) {
+    const mean = queue.reduce((n, a) => n + estimateUnits(a), 0) / nPages;
+    for (const a of [...queue]) {
+      if (estimateUnits(a) <= 1.5 * mean || queue.length <= 1) continue;
+      const alone = await evalPage(1, [a]);
+      if (alone.fit.overflow) { giveUp(a, alone.fit.overflow_pct); queue.splice(queue.indexOf(a), 1); }
     }
-    result.push({ doc: fit.doc, template: built.t, fit, articles: cur.map((a) => a.id) });
   }
-  for (const a of queue) unplaced.push(a.id);
-  return { pages: result, unplaced, elapsed_ms: Date.now() - t0 };
+
+  // 1-2: initial distribution
+  let groups: Article[][] = [];
+  if (bySection) {
+    const rest = [...queue];
+    for (let p = 1; p <= nPages; p++) {
+      const last = p === nPages;
+      const cur: Article[] = [];
+      while (rest.length && (last || !cur.length || sectionKey(rest[0]!) === sectionKey(cur[0]!))) cur.push(rest.shift()!);
+      groups.push(cur);
+    }
+  } else {
+    const caps = Array.from({ length: nPages }, (_, i) => (i === 0 ? 0.9 : 1));
+    const ends = partitionQueue(queue.map(estimateUnits), queue.map(sectionKey), nPages, caps);
+    let from = 0;
+    groups = ends.map((e) => { const g = queue.slice(from, e); from = e; return g; });
+  }
+
+  const evals: Ev[] = [];
+  for (let p = 1; p <= nPages; p++) evals.push(await evalPage(p, groups[p - 1]!));
+  const pen = (e: Ev, list: Article[]) => (list.length ? penalty(e.fit.fill, targetFill) : 1);
+  const total = () => evals.reduce((n, e, i) => n + pen(e, groups[i]!), 0);
+  const spent = () => evaluations - nPages >= budget;
+  const bad = (i: number) => pen(evals[i]!, groups[i]!) > 0;
+
+  // 4a: move / swap a story with a neighbour page (not when sections are pinned to pages)
+  if (!bySection) {
+    let improved = true;
+    while (improved && !spent()) {
+      improved = false;
+      // worst page first, ties by page number
+      const order2 = evals.map((_, i) => i).filter(bad).sort((a, b) => pen(evals[b]!, groups[b]!) - pen(evals[a]!, groups[a]!) || a - b);
+      for (const i of order2) {
+        if (improved || spent()) break;
+        const over = evals[i]!.fit.fill > 1;
+        const neighbours = [i - 1, i + 1].filter((j) => j >= 0 && j < nPages);
+        // prefer the neighbour with the most room (when this page is over) or the fullest (when it is low)
+        neighbours.sort((a, b) => (over ? evals[a]!.fit.fill - evals[b]!.fit.fill : evals[b]!.fit.fill - evals[a]!.fit.fill) || a - b);
+        for (const j of neighbours) {
+          const A = groups[i]!, B = groups[j]!;
+          // boundary stories on each side: nearest to the other page in queue order
+          const edgeA = j > i ? A.slice(-2).reverse() : A.slice(0, 2);
+          const edgeB = j > i ? B.slice(0, 2) : B.slice(-2).reverse();
+          const cands: { a: Article | null; b: Article | null }[] = [];
+          if (over) { for (const a of edgeA) cands.push({ a, b: null }); } else { for (const b of edgeB) cands.push({ a: null, b }); }
+          for (const a of edgeA) for (const b of edgeB) cands.push({ a, b });
+          for (const c of cands) {
+            if (spent()) break;
+            if (c.a && A.length < 2 && !c.b) continue;
+            if (c.b && B.length < 2 && !c.a) continue;
+            const nA = [...A.filter((x) => x !== c.a), ...(c.b ? [c.b] : [])].sort(byQ);
+            const nB = [...B.filter((x) => x !== c.b), ...(c.a ? [c.a] : [])].sort(byQ);
+            const eA = await evalPage(i + 1, nA), eB = await evalPage(j + 1, nB);
+            const before = pen(evals[i]!, A) + pen(evals[j]!, B);
+            const after = pen(eA, nA) + pen(eB, nB);
+            if (after < before - 1e-9) {
+              groups[i] = nA; groups[j] = nB; evals[i] = eA; evals[j] = eB;
+              improved = true;
+              break;
+            }
+          }
+          if (improved) break;
+        }
+      }
+    }
+  }
+
+  // 4b: span repair, one column at a time, on pages still outside the band
+  for (let i = 0; i < nPages && !spent(); i++) {
+    let again = true;
+    while (again && bad(i) && !spent()) {
+      again = false;
+      const list = groups[i]!;
+      const free = list.filter((a) => !(a.layout_hint && kindOfHint(a.layout_hint.slot)));
+      const over = evals[i]!.fit.fill > 1;
+      for (const a of free) {
+        if (spent() || again) break;
+        const cur = evals[i]!.fit.doc.items.find((it) => it.article_id === a.id)?.span ?? 3;
+        // too full: widen (shorter columns); too empty: narrow (taller)
+        for (const d of over ? [1, -1] : [-1, 1]) {
+          const next = cur + d;
+          if (next < 2 || next > evals[i]!.t.columns || spent()) continue;
+          const old = spanOv.get(a.id);
+          spanOv.set(a.id, next);
+          const e = await evalPage(i + 1, list);
+          if (pen(e, list) < pen(evals[i]!, list) - 1e-9) { evals[i] = e; again = true; break; }
+          if (old == null) spanOv.delete(a.id); else spanOv.set(a.id, old);
+        }
+      }
+    }
+  }
+
+  // 5: nothing is lost. A story that overflows a page even alone at the smallest size cannot be placed anywhere.
+  if (!bySection) {
+    for (let i = 0; i < nPages; i++) {
+      if (!evals[i]!.fit.overflow) continue;
+      // the page is still over: test its biggest story alone on a page (one real evaluation)
+      const big = [...groups[i]!].sort((a, b) => estimateUnits(b) - estimateUnits(a) || (a.id < b.id ? -1 : 1))[0]!;
+      const alone = groups[i]!.length === 1 ? evals[i]! : await evalPage(i + 1, [big]);
+      if (!alone.fit.overflow) continue;
+      giveUp(big, alone.fit.overflow_pct);
+      groups[i] = groups[i]!.filter((a) => a !== big);
+      evals[i] = await evalPage(i + 1, groups[i]!);
+    }
+  }
+  const result: PlannedPage[] = evals.map((e, i) => ({ doc: e.fit.doc, template: e.t, fit: e.fit, articles: groups[i]!.map((a) => a.id) }));
+  return { pages: result, unplaced, unplaced_reasons: reasons, evaluations, elapsed_ms: Date.now() - t0 };
 }

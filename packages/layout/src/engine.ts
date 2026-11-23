@@ -91,6 +91,35 @@ export class LayoutEngine {
     return this.report(cur, t, res.fill, res.px, res.steps);
   }
 
+  /**
+   * Grow-to-fill, for a page the normal fit loop leaves under `target` (fill ratio): load once, then
+   * pick the smallest body size in [start, max] whose fill reaches `target` without overflowing.
+   * Falls back to the largest size that still fits. The fit loop itself (fit) is untouched; this only
+   * chooses a larger starting size, within the template's own limits, and reports honestly.
+   */
+  async fitGrow(doc: PageDoc, t: Template, articles: readonly Article[] = [], target = 0.9): Promise<FitReport> {
+    await this.load(doc, t, articles);
+    const step = t.body.step_px;
+    const lo0 = Math.min(t.body.start_px, t.body.max_px);
+    const n = Math.max(0, Math.floor((t.body.max_px - lo0) / step + 1e-9));
+    const px = (i: number) => +(lo0 + i * step).toFixed(2);
+    const memo = new Map<number, number>();
+    const at = async (i: number) => { if (!memo.has(i)) memo.set(i, await this.fillAt(doc, t, px(i))); return memo.get(i)!; };
+    // largest index that does not overflow (fill is non-decreasing in size)
+    let a = 0, b = n;
+    if ((await at(0)) > 1) { const r = await fitBodySizeAsync((p) => this.fillAt(doc, t, p), { start: lo0, min: t.body.min_px, step }); return this.report(doc, t, r.fill, r.px, r.steps); }
+    while (a < b) { const m = (a + b + 1) >> 1; if ((await at(m)) <= 1) a = m; else b = m - 1; }
+    const hi = a;
+    let best = hi;
+    if ((await at(hi)) >= target) {
+      let l = 0, h = hi;
+      while (l < h) { const m = (l + h) >> 1; if ((await at(m)) >= target) h = m; else l = m + 1; }
+      best = l;
+    }
+    const fill = await this.fillAt(doc, t, px(best));
+    return this.report(doc, t, fill, px(best), memo.size);
+  }
+
   private async report(doc: PageDoc, t: Template, fill: number, px: number, steps: number): Promise<FitReport> {
     const pct = Math.round(fill * 100);
     const raw = await this.page.evaluate(domFrames);
