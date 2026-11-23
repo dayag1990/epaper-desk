@@ -1,5 +1,5 @@
 import { PageDocSchema, type Article, type PageDoc } from "@epaper/core";
-import { autoPlan, type Template } from "@epaper/layout";
+import { autoPlan, formatEditionDate, type Template } from "@epaper/layout";
 import { prisma } from "../db.js";
 import { articlesForRender, edRef, loadArticles, type JobCtx } from "../ctx.js";
 import { pool } from "../pool.js";
@@ -28,7 +28,7 @@ export async function editionAutoplan(e: Envelope) {
     // make sure the pictures are in the store before laying out (idempotent)
     for (const a of articles) for (const im of a.images) await fetchAsset(e.paper_id, { article_id: a.id, asset_id: im.asset_id, src: im.src, caption: im.caption, credit: im.credit }).catch((err) => console.log("picture skipped:", (err as Error).message));
     const renderArticles = await articlesForRender(e.paper_id, articles);
-    const plan = await pool.withEngine((eng) => autoPlan(eng, renderArticles, templates, { pages: e.payload.pages, date: stripDate(ed.date) }));
+    const plan = await pool.withEngine((eng) => autoPlan(eng, renderArticles, templates, { pages: e.payload.pages, date: formatEditionDate(ed.date, templates[0]!) ?? stripDate(ed.date), sectionPages: e.payload.sections ?? templates[0]!.section_order }));
     for (const pp of plan.pages) {
       const doc = PageDocSchema.parse(pp.fit.doc);
       const snap = await pool.withEngine((eng) => eng.snapshot(edRef(ed.id), [{ doc, template: pp.template }], renderArticles));

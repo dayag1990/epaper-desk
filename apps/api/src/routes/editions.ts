@@ -67,7 +67,7 @@ export function editionRoutes(app: App) {
   });
 
   app.post("/v1/editions/:id/autoplan", {
-    schema: { tags: ["editions"], params: Id, body: z.object({ pages: z.number().int().min(1).max(64).optional(), article_ids: z.array(z.string()).optional(), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }).default({}) },
+    schema: { tags: ["editions"], params: Id, body: z.object({ pages: z.number().int().min(1).max(64).optional(), sections: z.array(z.string()).optional(), article_ids: z.array(z.string()).optional(), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }).default({}) },
     preHandler: requireRole(...WRITE_ROLES),
   }, async (req, reply) => {
     const p = req.principal!;

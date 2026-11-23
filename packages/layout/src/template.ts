@@ -57,6 +57,10 @@ export const TemplateSchema = z.object({
   colors: z.object({ ink: z.string(), red: z.string(), blue: z.string(), rule: z.string(), paper: z.string(), mast: z.string() }),
   masthead_px: z.object({ name: z.number(), tag: z.number() }),
   styles: z.object({ head: z.string(), sub: z.string(), body: z.string() }),
+  /** Section names in page order: the default page order of auto-plan for this paper (page 1 = first name). */
+  section_order: z.array(z.string()).optional(),
+  /** How the edition date is printed in the strip, e.g. {locale: "ta", pattern: "{month} {day}, {year}"}. Default: English uppercase weekday and date. */
+  date_format: z.object({ locale: z.string(), pattern: z.string() }).optional(),
   /** What the IDML export needs to know about this template (paragraph style -> FontStyle named instance, Indic composer). */
   idml: z.object({ font_styles: z.record(z.string()).default({}) }).optional(),
   slots: z.array(SlotSchema),

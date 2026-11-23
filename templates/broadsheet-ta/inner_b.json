@@ -88,6 +88,20 @@
       "Story-body": "Regular"
     }
   },
+  "section_order": [
+    "முதல் பக்கம்",
+    "தமிழ்நாடு",
+    "சென்னை",
+    "இந்தியா",
+    "உலகம்",
+    "வணிகம்",
+    "விளையாட்டு",
+    "சினிமா"
+  ],
+  "date_format": {
+    "locale": "ta",
+    "pattern": "{month} {day}, {year}"
+  },
   "slots": [
     {
       "id": "story_col_span-5-1",

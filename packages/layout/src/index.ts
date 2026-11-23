@@ -9,3 +9,4 @@ export * from "./render.js";
 export * from "./dom.js";
 export * from "./engine.js";
 export * from "./autoplan.js";
+export * from "./date.js";

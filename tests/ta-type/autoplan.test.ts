@@ -2,7 +2,7 @@
 // Photos are absent in the fixture, so a second run puts a placeholder photo on the lead story of every page.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Article } from "@epaper/core";
-import { LayoutEngine, autoPlan, type PlanResult } from "../../packages/layout/dist/index.js";
+import { LayoutEngine, autoPlan, formatEditionDate, type PlanResult } from "../../packages/layout/dist/index.js";
 import { DATE_TA, SECTIONS, ingestTamil, planTamil, taTemplates, withPlaceholder } from "./lib/tamil.js";
 
 let eng: LayoutEngine, arts: Article[], plain: PlanResult, photo: PlanResult;
@@ -20,6 +20,14 @@ beforeAll(async () => {
 afterAll(async () => { await eng?.close(); });
 
 describe("40 Tamil articles -> 8 pages", () => {
+  it("the template set carries the section order and the Tamil date format", () => {
+    const t = taTemplates();
+    for (const x of t) expect(x.section_order).toEqual(SECTIONS);
+    expect(formatEditionDate(new Date("2026-11-24T00:00:00Z"), t[0]!)).toBe(DATE_TA);
+    expect(formatEditionDate(new Date("2026-01-05T00:00:00Z"), t[0]!)).toBe("ஜனவரி 5, 2026");
+    expect(formatEditionDate(new Date("2026-11-24T00:00:00Z"), { date_format: undefined })).toBeUndefined();
+  });
+
   it("was ingested through the RSS adapter: 40 articles, 8 sections of 5, Tamil, NFC", () => {
     expect(arts).toHaveLength(40);
     expect(arts.every((a) => a.lang === "ta" && a.script === "Taml")).toBe(true);

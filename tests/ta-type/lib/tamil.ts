@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Article, PageDoc } from "@epaper/core";
 import { createRssConnector, MemoryArticleStore, RSS_DEFAULT_MAPPING, syncSource } from "../../../packages/connectors/src/index.js";
-import { autoPlan, loadTemplateSet, type LayoutEngine, type PlanResult, type Template } from "../../../packages/layout/dist/index.js";
+import { autoPlan, formatEditionDate, loadTemplateSet, type LayoutEngine, type PlanResult, type Template } from "../../../packages/layout/dist/index.js";
 
 export const ROOT = fileURLToPath(new URL("../../../", import.meta.url));
 export const SECTIONS = ["முதல் பக்கம்", "தமிழ்நாடு", "சென்னை", "இந்தியா", "உலகம்", "வணிகம்", "விளையாட்டு", "சினிமா"];
@@ -30,8 +30,11 @@ export function withPlaceholder(arts: readonly Article[], ids: ReadonlySet<strin
   return arts.map((a) => (ids.has(a.id) ? { ...a, images: [{ asset_id: `ast_ph${a.id.slice(-8)}` as never, role: "lead", src: PLACEHOLDER }] } : a));
 }
 
-export const planTamil = (engine: LayoutEngine, arts: readonly Article[]): Promise<PlanResult> =>
-  autoPlan(engine, arts, taTemplates(), { sectionPages: SECTIONS, date: DATE_TA });
+/** Plans exactly as the worker does: section order and date format come from the template set. */
+export function planTamil(engine: LayoutEngine, arts: readonly Article[]): Promise<PlanResult> {
+  const t = taTemplates();
+  return autoPlan(engine, arts, t, { sectionPages: t[0]!.section_order, date: formatEditionDate(new Date("2026-11-24T00:00:00Z"), t[0]!) });
+}
 
 // ---------------------------------------------------------------- proof inputs
 const words = (s: string) => s.split(/\s+/).filter(Boolean).length;
