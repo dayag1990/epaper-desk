@@ -230,7 +230,7 @@ export function evalExpr(expr: string, src: EvalSource, env: EvalEnv = {}): unkn
     if (isEls(v) && !steps.length) v = v; // keep as elements; coerced per field later
     if (!empty(v)) {
       // a blocks result with no text is not a value
-      if (Array.isArray(v) && v.length && typeof v[0] === "object" && v.every((b: any) => !String(b?.text ?? "").trim())) continue;
+      if (Array.isArray(v) && v.length && typeof v[0] === "object" && v[0] && "t" in (v[0] as object) && v.every((b: any) => !String(b?.text ?? "").trim())) continue;
       if (typeof v === "string" && !v.trim()) continue;
       return v;
     }
