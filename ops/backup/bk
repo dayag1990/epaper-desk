@@ -1,0 +1,179 @@
+#!/usr/bin/env bash
+# The backup service. Subcommands: daemon | push | basebackup | prune | retain | init-role | check | health
+# Runs as a non-root user in the `backup` container; never prints secrets.
+set -uo pipefail
+HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+. "$HERE/lib.sh"
+PG_BIN=${PG_BIN:-/usr/lib/postgresql/17/bin}
+PATH="$PG_BIN:$PATH"
+
+# ---- database role ---------------------------------------------------------------
+init_role() {
+  [ -n "${POSTGRES_BACKUP_PASSWORD:-}" ] || { st_err database "POSTGRES_BACKUP_PASSWORD is not set, so base backups cannot start."; return 1; }
+  PGPASSWORD=${POSTGRES_PASSWORD:-} psql -h "$PG_HOST" -U "$PG_SUPERUSER" -d "$PG_DB" -X -q -v ON_ERROR_STOP=1 \
+    >/dev/null 2>"$LOCKDIR/role.err" <<'SQL'
+\set pw `printenv POSTGRES_BACKUP_PASSWORD`
+SELECT format('%s ROLE backup LOGIN REPLICATION PASSWORD %L',
+  CASE WHEN EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'backup') THEN 'ALTER' ELSE 'CREATE' END, :'pw') \gexec
+SQL
+  if [ $? -ne 0 ]; then st_err database "Could not set up the backup role in Postgres: $(tail -1 "$LOCKDIR/role.err" | cut -c1-160)"; return 1; fi
+  st_clear database; touch "$LOCKDIR/role.ok"
+}
+pg_backup() { PGPASSWORD=$POSTGRES_BACKUP_PASSWORD "$@"; }
+
+archiver_state() {   # fills wal.last_archived / failure info from pg_stat_archiver
+  local row; [ -f "$LOCKDIR/role.ok" ] || return 0
+  row=$(pg_backup psql -h "$PG_HOST" -U backup -d "$PG_DB" -X -Atq -F '|' -c \
+    "select coalesce(to_char(last_archived_time at time zone 'utc','YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'),''), failed_count,
+            (last_failed_time is not null and (last_archived_time is null or last_failed_time > last_archived_time))
+     from pg_stat_archiver" 2>/dev/null) || return 0
+  IFS='|' read -r la fc failing <<<"$row"
+  st_set '.wal.last_archived = (if $la == "" then null else $la end) | .wal.archive_failures = ($fc|tonumber)' --arg la "$la" --arg fc "$fc"
+  if [ "$failing" = t ]; then st_err archive "Postgres cannot copy its log files to the archive folder right now."; else st_clear archive; fi
+}
+
+# ---- push to the bucket ----------------------------------------------------------
+do_push() {
+  load_restic_env || { st_err push "Backup is not set up: a bucket value or the backup password is empty."; return 2; }
+  local t0 out rc paths=() snap
+  t0=$(date +%s)
+  st_set '.push.last_attempt = $now'
+  if ! ensure_repo; then st_err push "Cannot reach or open the off-box bucket."; return 1; fi
+  find "$WAL_DIR" -maxdepth 1 -name '.tmp.*' -mmin +60 -delete 2>/dev/null
+  for p in "$FILES_DIR" "$WAL_DIR" "$BASE_DIR"; do [ -d "$p" ] && paths+=("$p"); done
+  [ -f "$CONFIG_COPY" ] && paths+=("$CONFIG_COPY")
+  out=$(timeout -k 15 "$PUSH_TIMEOUT" restic backup --host epaper --tag auto --skip-if-unchanged \
+        --exclude '.tmp.*' --exclude '.partial-*' --exclude '*.lock' "${paths[@]}" 2>&1); rc=$?
+  if [ $rc -eq 124 ] || [ $rc -eq 137 ]; then
+    st_err push "The upload stalled for $PUSH_TIMEOUT seconds and was stopped. It tries again next minute."; return 1
+  elif [ $rc -ne 0 ]; then
+    if grep -q 'already locked' <<<"$out"; then msg="The bucket is locked by another backup job. Trying again next minute."
+    else msg="The push to the off-box bucket failed: $(tail -1 <<<"$out" | tr -d '\r' | cut -c1-160)"; fi
+    st_err push "$msg"; return 1
+  fi
+  snap=$(grep -oE 'snapshot [0-9a-f]{8} saved' <<<"$out" | awk '{print $2}' | tail -1)
+  st_set '.push.last_ok=$now | .push.last_duration_s=($d|tonumber) | .push.snapshot=(if $s=="" then .push.snapshot else $s end)
+          | .files.last_ok=$now | .files.size_bytes=($f|tonumber)
+          | .wal.last_ok=$now | .wal.size_bytes=($w|tonumber) | .wal.segments=($n|tonumber)' \
+    --arg d "$(( $(date +%s) - t0 ))" --arg s "${snap:-}" --arg f "$(timeout 20 du -sb "$FILES_DIR" 2>/dev/null | cut -f1 || echo 0)" \
+    --arg w "$(dir_bytes "$WAL_DIR")" --arg n "$(find "$WAL_DIR" -maxdepth 1 -name '*.gz' 2>/dev/null | wc -l)"
+  st_clear push
+}
+cmd_push() {
+  exec 9>"$LOCKDIR/push.lock"
+  flock -n 9 || { log "previous push still running, skipping this tick"; return 0; }
+  archiver_state; do_push
+}
+
+# ---- base backup -----------------------------------------------------------------
+cmd_basebackup() {
+  exec 7>"$LOCKDIR/basebackup.lock"
+  flock -n 7 || { log "a base backup is already running"; return 0; }
+  mkdir -p "$BASE_DIR" || { st_err basebackup "The base backup folder cannot be created."; return 1; }
+  [ -f "$LOCKDIR/role.ok" ] || init_role || return 1
+  local avail; avail=$(df -Pk "$BASE_DIR" | awk 'NR==2{print $4}')
+  if [ "${avail:-0}" -lt 5242880 ]; then st_err basebackup "Less than 5 GB of disk is free, so the nightly base backup was skipped."; return 1; fi
+  local ts started tmp final err
+  ts=$(date -u +%Y%m%dT%H%M%SZ); started=$(now); tmp="$BASE_DIR/.partial-$ts"; final="$BASE_DIR/$ts"
+  rm -rf "$BASE_DIR"/.partial-*; mkdir -p "$tmp"
+  err="$LOCKDIR/basebackup.err"
+  if ! pg_backup pg_basebackup -h "$PG_HOST" -U backup -w -D "$tmp" -F t -z -X stream --checkpoint=fast >"$err" 2>&1; then
+    rm -rf "$tmp"; rm -f "$LOCKDIR/role.ok"
+    st_err basebackup "The base backup failed: $(tail -1 "$err" | cut -c1-160)"; return 1
+  fi
+  local start_wal
+  start_wal=$(tar -xzOf "$tmp/base.tar.gz" backup_label 2>/dev/null | sed -nE 's/^START WAL LOCATION: .*\(file ([0-9A-F]{24})\).*/\1/p')
+  [ -n "$start_wal" ] || { rm -rf "$tmp"; st_err basebackup "The base backup finished but its start point could not be read."; return 1; }
+  ( cd "$tmp" && sha256sum *.tar.gz backup_manifest > SHA256SUMS && sha256sum -c --quiet SHA256SUMS ) || { rm -rf "$tmp"; st_err basebackup "The new base backup failed its own checksum test."; return 1; }
+  local size files_json
+  size=$(dir_bytes "$tmp")
+  files_json=$(cd "$tmp" && for f in *.tar.gz; do jq -n --arg n "$f" --arg s "$(sha256sum "$f" | cut -d' ' -f1)" --argjson b "$(stat -c %s "$f")" '{name:$n,sha256:$s,bytes:$b}'; done | jq -s .)
+  jq -n --arg name "$ts" --arg st "$started" --arg fin "$(now)" --arg sw "$start_wal" --argjson sz "$size" --argjson files "$files_json" \
+    --arg pgv "$(pg_basebackup --version | awk '{print $NF}')" \
+    '{name:$name, started:$st, finished:$fin, start_wal:$sw, size_bytes:$sz, postgres:$pgv, format:"tar+gzip, wal streamed", files:$files}' > "$tmp/manifest.json"
+  sync -f "$tmp/manifest.json" 2>/dev/null || true
+  mv "$tmp" "$final" || { st_err basebackup "Could not finish the base backup folder."; return 1; }
+  retain_basebackups "$KEEP_BASEBACKUPS"
+  st_set '.basebackup.last_ok=$now | .basebackup.size_bytes=($sz|tonumber) | .basebackup.name=$n | .basebackup.kept=($k|tonumber)' \
+    --arg sz "$size" --arg n "$ts" --arg k "$(list_basebackups | wc -l)"
+  st_clear basebackup; log "base backup $ts done ($size bytes)"
+}
+
+# ---- nightly clean-up in the bucket -------------------------------------------------
+cmd_prune() {
+  load_restic_env || return 2
+  exec 9>"$LOCKDIR/push.lock"; flock -w 300 9 || { log "prune: push is busy, trying again later"; return 1; }
+  local out
+  if out=$(timeout -k 15 3000 restic forget --host epaper --tag auto --keep-hourly 24 --keep-daily 14 --keep-weekly 4 --prune 2>&1); then
+    st_set '.prune.last_ok=$now'; st_clear prune
+  else st_err prune "The nightly clean-up of old backups in the bucket failed: $(tail -1 <<<"$out" | cut -c1-160)"; return 1; fi
+}
+
+# ---- checks (used by scripts/backup-check.sh) --------------------------------------------
+cmd_check() {
+  local bad=0 now_e=$(date +%s) last age out newest
+  say() { echo "$*"; }
+  if [ -s "$STATUS" ] && last=$(jq -r '.push.last_ok // empty' "$STATUS") && [ -n "$last" ]; then
+    age=$(( now_e - $(epoch "$last") ))
+    if [ "$age" -lt 300 ]; then say "OK: the last push to the bucket was $age seconds ago."; else say "FAIL: the last push to the bucket was $((age/60)) minutes ago (limit 5)."; bad=1; fi
+  else say "FAIL: no push to the bucket has succeeded yet."; bad=1; fi
+  load_restic_env || { say "FAIL: a bucket value or the backup password is empty."; return 1; }
+  if out=$(timeout 90 restic snapshots --latest 1 --host epaper --compact 2>&1); then say "OK: the off-box bucket answers and the repository opens."
+  else say "FAIL: the off-box bucket is unreachable or the repository cannot be read ($(tail -1 <<<"$out" | cut -c1-120))."; return 1; fi
+  newest=$(list_basebackups | head -1)
+  if [ -n "$newest" ] && last=$(jq -r .finished "$BASE_DIR/$newest/manifest.json"); then
+    age=$(( now_e - $(epoch "$last") ))
+    if [ "$age" -lt 93600 ]; then say "OK: the newest base backup is $((age/3600)) hours old."; else say "FAIL: the newest base backup is $((age/3600)) hours old (limit 26)."; bad=1; fi
+  else say "FAIL: there is no complete base backup."; bad=1; fi
+  if [ "${CHECK_SKIP_DATA:-0}" = 1 ]; then say "SKIP: data read test."
+  elif out=$(timeout 1200 restic check --read-data-subset=1% 2>&1); then say "OK: restic check read 1% of the stored data and found no damage."
+  else say "FAIL: restic check found a problem: $(tail -1 <<<"$out" | cut -c1-140)."; bad=1; fi
+  return $bad
+}
+
+cmd_health() {   # container healthcheck: status file refreshed in the last 3 minutes
+  [ -s "$STATUS" ] || exit 1
+  local u; u=$(jq -r .updated "$STATUS"); [ $(( $(date +%s) - $(epoch "$u") )) -lt 180 ]
+}
+
+# ---- scheduler ----------------------------------------------------------------------------
+bb_due() {
+  local newest fin day_start
+  newest=$(list_basebackups | head -1)
+  [ -z "$newest" ] && return 0
+  fin=$(epoch "$(jq -r .finished "$BASE_DIR/$newest/manifest.json")")
+  day_start=$(date -u -d "$(date -u +%Y-%m-%d) 03:00:00" +%s)
+  [ "$(date +%s)" -ge "$day_start" ] && [ "$fin" -lt "$day_start" ]
+}
+prune_due() {
+  [ "$(date -u +%H%M)" \> "0329" ] || return 1
+  local last; last=$(jq -r '.prune.last_ok // empty' "$STATUS" 2>/dev/null)
+  [ -z "$last" ] || [ "${last%%T*}" != "$(date -u +%Y-%m-%d)" ]
+}
+cmd_daemon() {
+  mkdir -p "$BASE_DIR" 2>/dev/null; [ -w "$DATA" ] || { echo "backup: $DATA is not writable" >&2; exit 1; }
+  for d in "$WAL_DIR" "$BASE_DIR"; do [ -d "$d" ] && [ -w "$d" ] || { echo "backup: $d is missing or not writable; run scripts/backup-init.sh" >&2; exit 1; }; done
+  st_set '.'
+  local interval=${PUSH_INTERVAL:-60} last_bb=0 last_pr=0
+  log "started: push every ${interval}s, base backup 03:00 UTC, keep $KEEP_BASEBACKUPS"
+  trap 'log "stopping"; exit 0' TERM INT
+  while :; do
+    [ -f "$LOCKDIR/role.ok" ] || init_role >/dev/null 2>&1 || true
+    if bb_due && [ $(( $(date +%s) - last_bb )) -gt 900 ]; then last_bb=$(date +%s); ( cmd_basebackup ) & fi
+    if prune_due && [ $(( $(date +%s) - last_pr )) -gt 3600 ]; then last_pr=$(date +%s); ( cmd_prune ) & fi
+    ( cmd_push ) &
+    sleep "$interval" & wait $!
+  done
+}
+
+case "${1:-}" in
+  daemon) cmd_daemon;;
+  push) cmd_push;;
+  basebackup) cmd_basebackup;;
+  prune) cmd_prune;;
+  retain) retain_basebackups "${2:-$KEEP_BASEBACKUPS}";;
+  init-role) init_role;;
+  check) cmd_check;;
+  health) cmd_health;;
+  *) echo "usage: bk daemon|push|basebackup|prune|retain|init-role|check|health" >&2; exit 64;;
+esac
