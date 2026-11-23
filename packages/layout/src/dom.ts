@@ -114,3 +114,71 @@ export async function domReady(): Promise<void> {
     Array.from(document.images).map((i) => (i.complete ? 0 : new Promise((r) => { i.onload = i.onerror = () => r(0); }))),
   );
 }
+
+export interface DomLine {
+  /** Stable id of the text element: "<item>.<role>[.<paragraph n>]" ("furniture.<class>.<n>" for masthead and strip). */
+  key: string;
+  /** Line number inside that element, 0-based, in visual order. */
+  n: number;
+  /** The words of the line joined by single spaces (as the source text spells them, NFC untouched). */
+  text: string;
+  first: string;
+  /** Box of the line on the template canvas, CSS px relative to the .page top-left (zoom and transform divided out). */
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
+/**
+ * Every line of text on the first .page, as the browser broke it: per text element, split into words with Range rects and
+ * grouped by line. Self-contained (serialised into Chromium). Positions are on the canvas, so they do not depend on the
+ * zoom the page is shown at. Call after domReady().
+ */
+export function domLines(): DomLine[] {
+  const page = document.querySelector(".page") as HTMLElement;
+  const pr = page.getBoundingClientRect();
+  const k = pr.width / page.offsetWidth; // transform scale of the page (editor zoom, print scale)
+  const out: DomLine[] = [];
+  const els: { el: Element; key: string }[] = [];
+  page.querySelectorAll(".mast .name, .mast .tag, .strip > *").forEach((el, i) => els.push({ el, key: `furniture.${el.className || el.tagName.toLowerCase()}.${i}` }));
+  page.querySelectorAll<HTMLElement>(".story").forEach((s) => {
+    const item = s.dataset.item ?? "";
+    s.querySelectorAll(".kicker, .head, .sub").forEach((el) => els.push({ el, key: `${item}.${el.className.split(" ")[0]}` }));
+    s.querySelectorAll(".body p").forEach((el, i) => els.push({ el, key: `${item}.body.${i}` }));
+  });
+  for (const { el, key } of els) {
+    const tn = Array.from(el.childNodes).find((c) => c.nodeType === 3) as Text | undefined;
+    if (!tn) continue;
+    // one Range per grapheme cluster, so a break inside a "word" (after a hyphen, say) shows up as a line change too
+    type Cur = { text: string; first: string; sp: boolean; x0: number; y0: number; x1: number; y1: number };
+    let cur: Cur | null = null;
+    let n = 0;
+    const flush = () => {
+      if (cur) out.push({ key, n: n++, text: cur.text, first: cur.first, x0: cur.x0, y0: cur.y0, x1: cur.x1, y1: cur.y1 });
+      cur = null;
+    };
+    let space = false;
+    for (const g of new Intl.Segmenter("ta", { granularity: "grapheme" }).segment(tn.data)) {
+      const at = g.index;
+      const pos = at + g.segment.length;
+      if (/^\s+$/.test(g.segment)) { space = true; continue; }
+      const r = document.createRange();
+      r.setStart(tn, at);
+      r.setEnd(tn, pos);
+      const b = r.getClientRects()[0];
+      if (!b) continue;
+      const box = { x0: (b.left - pr.left) / k, y0: (b.top - pr.top) / k, x1: (b.right - pr.left) / k, y1: (b.bottom - pr.top) / k };
+      if (cur && Math.abs(box.y0 - cur.y0) > (box.y1 - box.y0) * 0.4) flush();
+      if (!cur) cur = { text: "", first: "", sp: false, ...box };
+      if (space && cur.text) { cur.text += " "; cur.sp = true; }
+      space = false;
+      cur.text += g.segment;
+      if (!cur.sp) cur.first += g.segment;
+      cur.x0 = Math.min(cur.x0, box.x0);
+      cur.x1 = Math.max(cur.x1, box.x1);
+      cur.y1 = Math.max(cur.y1, box.y1);
+    }
+    flush();
+  }
+  return out;
+}

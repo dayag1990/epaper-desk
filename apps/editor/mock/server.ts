@@ -1,10 +1,13 @@
 import { createServer } from "node:http";
 import { MockBackend } from "./core";
 import { buildSeed } from "./seed";
+import { readFileSync } from "node:fs";
+import { fontContentType, fontsDir, resolveFontFile } from "@epaper/layout";
 
 const port = +(process.env.MOCK_PORT ?? 8181);
 const origin = `http://127.0.0.1:${port}`;
-const backend = new MockBackend(buildSeed(origin), origin);
+const seed = process.env.MOCK_SEED === "ta" ? await (await import("./seed-ta")).buildTamilSeed() : buildSeed(origin);
+const backend = new MockBackend(seed, origin);
 const colour = (s: string) => `hsl(${[...s].reduce((a, c) => a + c.charCodeAt(0), 0) % 360} 45% 55%)`;
 
 const server = createServer(async (req, res) => {
@@ -15,6 +18,9 @@ const server = createServer(async (req, res) => {
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
   if (req.method === "OPTIONS") { res.writeHead(204).end(); return; }
   const url = new URL(req.url ?? "/", origin);
+  // the same font files the real API serves at /fonts (templates/fonts)
+  const font = url.pathname.startsWith("/fonts/") ? resolveFontFile(fontsDir(), url.pathname.slice(7)) : null;
+  if (font) { res.writeHead(200, { "content-type": fontContentType(font)!, "cache-control": "public, max-age=31536000, immutable" }); res.end(readFileSync(font)); return; }
   const img = /^\/mock-assets\/([\w-]+)\.svg$/.exec(url.pathname);
   if (img) {
     const id = img[1]!;

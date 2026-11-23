@@ -2,7 +2,7 @@ import type { Article, PageDoc, PageItem } from "@epaper/core";
 import { packSpans } from "./pack.js";
 import { paperCss } from "./css.js";
 import { colsForSpan, type Template } from "./template.js";
-import { ptToPx, round } from "./units.js";
+import { round, storedBodyPx } from "./units.js";
 
 export const esc = (s: unknown): string =>
   String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -91,7 +91,7 @@ export function renderPage(doc: PageDoc, template: Template, articles: readonly 
   const editable = !!opts.editable;
   const ed = editable ? ` contenteditable="true" spellcheck="false"` : "";
   const ph = (s: string) => (editable ? ` data-ph="${esc(s)}"` : "");
-  const bodyPx = opts.bodyPx ?? round(ptToPx(doc.page.body_pt, t), 3);
+  const bodyPx = opts.bodyPx ?? storedBodyPx(doc.page.body_pt, t);
   const spans = packedSpans(doc, t);
   const f = doc.furniture ?? { masthead: "", tagline: "", strip: [] as string[] };
   const strip = [0, 1, 2].map((i) => f.strip[i] ?? "");

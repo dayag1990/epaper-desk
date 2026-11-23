@@ -15,7 +15,7 @@ type Panel = null | "photo" | "tray" | "versions" | "ai";
 export function App({ store, api, cfg }: { store: EditorStore; api: Api; cfg: EditorConfig }) {
   const s = useSyncExternalStore(store.subscribe, store.getSnapshot);
   const [editing, setEditing] = useState(() => window.innerWidth >= 900);
-  const [zoom, setZoomRaw] = useState(0.5);
+  const [zoom, setZoomRaw] = useState(cfg.zoom && cfg.zoom > 0 ? cfg.zoom : 0.5);
   const anchor = useRef<{ r: number; ax: number; ay: number; vx: number; vy: number } | null>(null);
   const [panel, setPanel] = useState<Panel>(null);
   const [delArmed, setDelArmed] = useState(false);
@@ -83,7 +83,7 @@ export function App({ store, api, cfg }: { store: EditorStore; api: Api; cfg: Ed
   }, [template]);
   const fitted = useRef<string | null>(null);
   useEffect(() => {
-    if (template && fitted.current !== pid) { fitted.current = pid; fitZoom(); }
+    if (template && fitted.current !== pid) { fitted.current = pid; if (!cfg.zoom) fitZoom(); } // a zoom fixed by the config (tests) is kept
   }, [template, pid, fitZoom]);
 
   // keyboard undo / redo, browser online, leaving with unsaved work
