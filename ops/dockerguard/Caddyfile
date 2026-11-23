@@ -1,0 +1,23 @@
+{
+	admin off
+	auto_https off
+}
+
+# Docker API filter that sits between the ops desk and the socket proxy.
+# Owner rule (after the 2026-11-23 incident): nothing prunes the live project, and the desk never
+# deletes volumes, networks or images. The socket proxy only filters by URL group, so these routes
+# are cut here. Containers can still be replaced (that is how a deploy and a rollback work).
+:2375 {
+	@prune path_regexp prune ^/(v[0-9.]+/)?(system|containers|images|volumes|networks|build)/prune$
+	respond @prune `{"message":"Blocked: nobody prunes the live project."}` 403
+
+	@delete {
+		method DELETE
+		path_regexp del ^/(v[0-9.]+/)?(volumes|networks|images)(/|$)
+	}
+	respond @delete `{"message":"Blocked: volumes, networks and images are never deleted through the ops desk."}` 403
+
+	reverse_proxy dockerproxy:2375 {
+		flush_interval -1
+	}
+}

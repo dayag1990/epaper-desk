@@ -54,8 +54,36 @@ services:
       DISTRIBUTION: "0"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-    networks: [opsdocker]
+    networks: [proxyback]
     security_opt: ["no-new-privileges:true"]
+    cpus: 0.25
+    mem_limit: 128m
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:2375/_ping || exit 1"]
+      interval: 10s
+      timeout: 4s
+      retries: 5
+
+  # The filter between the desk and the proxy: refuses every prune route and every delete of volumes,
+  # networks or images (owner rule after the 2026-11-23 incident; see ops/dockerguard/Caddyfile and
+  # tests/ops-dockerguard.test.ts). The desk can only reach Docker through this.
+  dockerguard:
+    image: caddy:2.8.4-alpine
+    container_name: epaper-dockerguard
+    restart: unless-stopped
+    depends_on: { dockerproxy: { condition: service_healthy } }
+    environment:
+      XDG_DATA_HOME: /tmp/caddy-data
+      XDG_CONFIG_HOME: /tmp/caddy-config
+    volumes:
+      - ./ops/dockerguard:/etc/caddy:ro # the folder, not one file
+    networks: [proxyback, opsdocker]
+    user: "1001:1001"
+    read_only: true
+    tmpfs: ["/tmp:size=16m,uid=1001,gid=1001"]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
     cpus: 0.25
     mem_limit: 128m
     healthcheck:
@@ -67,9 +95,9 @@ services:
   ops:
     build: { context: ., dockerfile: apps/ops/Dockerfile }
     image: epaper/ops:${EPAPER_RELEASE:-dev}
-    depends_on: { dockerproxy: { condition: service_healthy } }
+    depends_on: { dockerguard: { condition: service_healthy } }
     environment:
-      DOCKER_HOST: http://dockerproxy:2375
+      DOCKER_HOST: http://dockerguard:2375
       OPS_PORT: "8101"
       OPS_PROC_DIR: /host/proc
       OPS_SCRIPTS_DIR: /srv/epaper/desk/scripts
@@ -104,5 +132,7 @@ services:
     image: epaper/worker:${EPAPER_RELEASE:-dev}
 
 networks:
-  opsdocker:
+  opsdocker:   # desk <-> dockerguard only
+    internal: true
+  proxyback:   # dockerguard <-> dockerproxy only
     internal: true
