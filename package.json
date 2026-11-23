@@ -10,7 +10,7 @@
     "test": "vitest run",
     "typecheck": "pnpm -r --if-present typecheck",
     "db:generate": "prisma generate --schema prisma/schema.prisma",
-    "db:seed": "tsx prisma/seed.ts"
+    "db:seed": "tsx prisma/seed.mts"
   },
   "dependencies": {
     "@prisma/client": "6.2.1",
