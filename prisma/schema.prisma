@@ -345,6 +345,7 @@ model EpPage {
   text          String   @default("")
   corrected     Boolean  @default(false)
   zoned_by      String?
+  src_hash      String?
   created_at    DateTime @default(now())
 
   edition EpEdition @relation(fields: [ep_edition_id], references: [id])

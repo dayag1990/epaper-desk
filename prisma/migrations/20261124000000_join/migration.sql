@@ -165,6 +165,7 @@ CREATE TABLE "ep_pages" (
     "text" TEXT NOT NULL DEFAULT '',
     "corrected" BOOLEAN NOT NULL DEFAULT false,
     "zoned_by" TEXT,
+    "src_hash" TEXT,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "ep_pages_pkey" PRIMARY KEY ("id")
