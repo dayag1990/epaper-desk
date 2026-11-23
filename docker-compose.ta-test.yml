@@ -6,19 +6,19 @@ services:
   postgres:
     container_name: tmp-ta-postgres
   api:
-    image: epaper/api:ta
+    image: tmp-ta-api:ta
     container_name: tmp-ta-api
     ports: !override ["127.0.0.1:8111:8100"]
     volumes: !override ["/srv/epaper/files-ta-tmp:/files"]
     extra_hosts: ["host.docker.internal:host-gateway"]
   worker:
-    image: epaper/worker:ta
+    image: tmp-ta-worker:ta
     container_name: tmp-ta-worker
     volumes: !override ["/srv/epaper/files-ta-tmp:/files"]
     extra_hosts: ["host.docker.internal:host-gateway"]
   # The site's pages link to http://127.0.0.1:8190/..., so each container needs that address to answer (same trick as docker-compose.join-test.yml).
   demo-api:
-    image: epaper/api:ta
+    image: tmp-ta-api:ta
     container_name: tmp-ta-demo-api
     network_mode: "service:api"
     depends_on: { api: { condition: service_healthy } }
@@ -27,7 +27,7 @@ services:
     user: "1001:1001"
     restart: "no"
   demo-worker:
-    image: epaper/api:ta
+    image: tmp-ta-api:ta
     container_name: tmp-ta-demo-worker
     network_mode: "service:worker"
     depends_on: { worker: { condition: service_healthy } }

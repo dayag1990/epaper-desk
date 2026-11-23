@@ -1,6 +1,6 @@
 // Tamil demo through the real API + worker, in a THROWAWAY compose project (tmp-ta, API on 127.0.0.1:8111). The live project is never touched.
 //   pnpm exec vitest run -c vitest.stack.config.ts tests/ta-type/stack
-// Brings the stack up itself (images epaper/api:ta, epaper/worker:ta are built from this checkout by compose on first use) and leaves it
+// Brings the stack up itself (images tmp-ta-api:ta, tmp-ta-worker:ta are built from this checkout by compose on first use) and leaves it
 // running for the next run; remove it with:  BACKUP_ROOT=/srv/epaper/ta-tmp-root docker compose -p tmp-ta -f docker-compose.yml -f docker-compose.ta-test.yml down -v
 // Covers: GET /fonts, 40 Tamil articles synced through the wizard/RSS source, 8 section pages auto-planned from the template set, the screen PDF made
 // by the worker's Chromium (fonts embedded, text exact), and the IDML export (job, write-once store, download, structural validation).
