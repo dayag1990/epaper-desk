@@ -35,12 +35,17 @@ const kids = (el: any, name: string): any[] => {
 
 export function parseCXML(text: string): CxmlDoc {
   const problems: string[] = [];
-  const doc = new DOMParser({
-    onError: (level: string, msg: string) => {
-      if (level !== "warning") problems.push(msg);
-    },
-  }).parseFromString(text, "application/xml");
-  if (problems.length || !doc || !doc.documentElement) throw new RejectError("XML is not well-formed");
+  let doc: any;
+  try {
+    doc = new DOMParser({
+      onError: (level: string, msg: string) => {
+        if (level !== "warning") problems.push(msg);
+      },
+    }).parseFromString(text, "application/xml");
+  } catch (e) {
+    problems.push((e as Error).message);
+  }
+  if (problems.length || !doc || !doc.documentElement) throw new RejectError("XML is not well-formed" + (problems[0] ? " (" + problems[0].split("\n")[0] + ")" : ""));
   const root: any = doc.documentElement;
   if (root.localName !== "content") throw new RejectError("Not a ContentXML file (root is <" + root.nodeName + ">)");
   const rootAttrs = Array.from(root.attributes as ArrayLike<any>).map((a: any) => ` ${a.name}="${esc(a.value)}"`).join("");
@@ -186,7 +191,8 @@ export function cxmlToDraft(
   const heads = s.paras.filter((p) => role(p.ptype) === "head");
   const subs = s.paras.filter((p) => role(p.ptype) === "sub");
   const bodies = s.paras.filter((p) => role(p.ptype) === "body" && p.text);
-  const headline = heads.map((p) => p.text).join(" ");
+  // an editorial has no head of its own: its label (the quote context) stands in as the headline
+  const headline = heads.map((p) => p.text).join(" ") || (s.kind === "edit" ? s.kicker?.text ?? "" : "");
   if (!headline) throw new RejectError("This story has no headline.");
   const all = s.paras.map((p) => p.text).join(" ");
   const { lang, script } = detectScript(all);
