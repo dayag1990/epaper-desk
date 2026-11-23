@@ -49,6 +49,8 @@ async function until<T>(what: string, fn: () => Promise<T | undefined | false>, 
 }
 
 let owner: string, ana: string, editionId: string, pages: any[] = [], leadIds: string[] = [];
+mkdirSync("/srv/epaper/ta-tmp-root", { recursive: true }); // the test makes its own scratch folder
+for (const d of ["/srv/epaper/ta-tmp-root/walarchive", "/srv/epaper/files-ta-tmp"]) mkdirSync(d, { recursive: true, mode: 0o777 }); // made by us (uid 1001), not by Docker as root
 const root = mkdtempSync("/srv/epaper/ta-tmp-root/site-");
 
 beforeAll(async () => {
@@ -66,6 +68,7 @@ beforeAll(async () => {
     rss = rss.replace(new RegExp(`(<link>[^<]*/news/${lead.id}\\.html</link>[\\s\\S]*?)</item>`), `$1<media:content url="http://127.0.0.1:8190/img/${lead.id}.jpg" medium="image" type="image/jpeg"/></item>`);
   }
   writeFileSync(join(site, "rss.xml"), rss);
+  sh(`${COMPOSE} build api worker`, `TA_SITE=${site}`); // the images tmp-ta-api:ta / tmp-ta-worker:ta do not exist on a clean box
   sh(`${COMPOSE} up -d postgres api worker demo-api demo-worker`, `TA_SITE=${site}`);
   await until("api ready", async () => (await call("GET", "/readyz").catch(() => ({ status: 0 }))).status === 200);
   sh(`${COMPOSE} exec -T -e SEED_OWNER_PASSWORD=${PW.owner} -e SEED_PAPER_SLUG=${slug} -e SEED_OWNER_EMAIL=${EMAIL("owner")} api sh -c 'cd /app && node_modules/.bin/tsx prisma/seed.mts'`);
