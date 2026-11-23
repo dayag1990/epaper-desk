@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser } from "playwright";
 import { LayoutSnapshotSchema, PageDocSchema, type Article } from "@epaper/core";
 import { LayoutEngine, autoPlan, fitBodySize, lowResCheck, renderPage, requiredPixels, effectiveDpi } from "../src/index.js";
-import { englishArticles, protoToDocs, ROOT, tpl, tplSet } from "./helpers.js";
+import { englishArticles, punjabiArticles, tpl, tplSet } from "./helpers.js";
 
 let engine: LayoutEngine, browser: Browser;
 beforeAll(async () => { engine = await LayoutEngine.launch(); browser = await chromium.launch(); }, 60000);
@@ -133,22 +133,7 @@ describe("editor vs headless", () => {
 
 describe("Punjabi sample", () => {
   it("plans to 2 pages (one per section) and reports fit per page honestly", async () => {
-    const pg = await browser.newPage();
-    await pg.route(/^https?:/, (r) => r.abort());
-    await pg.goto("file://" + join(ROOT, "epaper-desk-prototype.html"));
-    const model = await pg.evaluate(() => (window as any).__api.parseCXML((globalThis as any).eval("SAMPLE")));
-    await pg.close();
-    const docs = protoToDocs(model, () => "front_a");
-    const arts: Article[] = [];
-    docs.forEach((d, si) => d.items.forEach((it, n) => {
-      arts.push({
-        id: `art_s${si}n${n}` as never, paper_id: "pap_demo" as never, source_id: "src_demo" as never, external_id: `s${si}n${n}`, url: "https://example.com/x", lang: "pa", script: "Guru",
-        section: `Main${si + 1}`, tags: [], priority: 50, kicker: it.text?.kicker ?? null, headline: it.text?.head ?? "", subhead: it.text?.sub ?? null,
-        body: (it.text?.body ?? []).map((text) => ({ t: "p" as const, text })), images: [],
-        layout_hint: { page: `Main${si + 1}`, slot: it.slot!, span: +(/span-(\d)/.exec(it.slot!)?.[1] ?? 3), order: n },
-        published_at: "2026-04-02T00:00:00Z", updated_at: "2026-04-02T00:00:00Z", content_hash: "sha256:x", rev: 1,
-      });
-    }));
+    const arts = await punjabiArticles(browser);
     const plan = await autoPlan(engine, arts, [tpl("prototype-pa", "front_a"), tpl("prototype-pa", "inner_a")]);
     console.log("punjabi sample", plan.pages.map((p) => `p${p.doc.page.no} ${p.fit.fill_pct}% ${p.fit.state} ${p.fit.body_px}px`).join(" | "));
     expect(plan.pages.length).toBe(2);
