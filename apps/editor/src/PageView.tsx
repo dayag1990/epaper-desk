@@ -127,6 +127,17 @@ export function PageView(p: PageViewProps) {
     setBox((o) => (o && Object.keys(nb).every((k) => Math.abs((o as never)[k] - (nb as never)[k]) < 0.01) ? o : nb));
   };
 
+  /** Selection state on the rendered blocks: class, role, aria-pressed, focusable. */
+  const decorate = () => {
+    host.current?.querySelectorAll<HTMLElement>(".story[data-item]").forEach((e) => {
+      const on = e.dataset.item === props.current.selected;
+      e.classList.toggle("sel", on);
+      e.setAttribute("role", "button");
+      e.setAttribute("tabindex", "0");
+      e.setAttribute("aria-pressed", on ? "true" : "false");
+      e.setAttribute("aria-label", `Story block: ${e.querySelector(".head")?.textContent || "untitled"}`);
+    });
+  };
   const measure = () => {
     cancelAnimationFrame(raf.current);
     raf.current = requestAnimationFrame(async () => {
@@ -187,6 +198,7 @@ export function PageView(p: PageViewProps) {
       editScope.current = null;
       setEditing(false);
       h.querySelector<HTMLElement>(".page")!.style.setProperty("--z", String(props.current.zoom));
+      decorate();
       if (hadFocus && props.current.selected) h.querySelector<HTMLElement>(`.story[data-item="${CSS.escape(props.current.selected)}"]`)?.focus({ preventScroll: true });
       measure();
     }
@@ -200,14 +212,7 @@ export function PageView(p: PageViewProps) {
   }, [p.zoom]);
   useEffect(() => {
     const h = host.current!;
-    h.querySelectorAll<HTMLElement>(".story[data-item]").forEach((e) => {
-      const on = e.dataset.item === p.selected;
-      e.classList.toggle("sel", on);
-      e.setAttribute("role", "button");
-      e.setAttribute("tabindex", "0");
-      e.setAttribute("aria-pressed", on ? "true" : "false");
-      e.setAttribute("aria-label", `Story block: ${e.querySelector(".head")?.textContent || "untitled"}`);
-    });
+    decorate();
     if (editScope.current && editScope.current.matches(".story") && (editScope.current as HTMLElement).dataset.item !== p.selected) leaveEdit(false);
     updateBox();
   });
@@ -237,6 +242,12 @@ export function PageView(p: PageViewProps) {
     addEventListener("pointermove", mv); addEventListener("pointerup", up); addEventListener("pointercancel", up);
   };
 
+  /** After a drag or resize the browser still sends a click to whichever element is above both ends: swallow it. */
+  const swallowNextClick = () => {
+    const f = (e: Event) => { e.stopPropagation(); e.preventDefault(); };
+    addEventListener("click", f, { capture: true, once: true });
+    setTimeout(() => removeEventListener("click", f, true), 80);
+  };
   const startMove = (e: { pointerId: number; clientX: number; clientY: number }, id: string) => {
     const g0 = geo();
     if (!g0) return;
@@ -264,6 +275,7 @@ export function PageView(p: PageViewProps) {
       setDrag(null); setGridBox(null);
       if (!started) return;
       suppressClick.current = true;
+      swallowNextClick();
       if (d && d.kind === "move") {
         refocus.current = true;
         const from = docRef.current.items.findIndex((i) => i.id === id);
@@ -303,6 +315,7 @@ export function PageView(p: PageViewProps) {
       const d = dragRef.current;
       setDrag(null); setGridBox(null);
       if (!d || d.kind !== "resize") return;
+      swallowNextClick();
       refocus.current = true;
       const val = edge === "s" ? d.cols : d.span;
       if (val !== (edge === "s" ? cols0 : span0)) props.current.onResize(id, edge, val);

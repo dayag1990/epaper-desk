@@ -32,8 +32,8 @@ select{padding:0 8px}
 .pv .story{cursor:default;outline:none}
 .pv .story:focus-visible{outline:2px dashed #1a73e8;outline-offset:6px}
 .pvo{position:absolute;inset:0;pointer-events:none}
-.selframe{position:absolute;border:2px solid #1a73e8;box-shadow:0 0 0 1px #fff;pointer-events:none}
-.selframe.is-editing{border-style:dashed}
+.selframe{position:absolute;outline:2px solid #1a73e8;box-shadow:0 0 0 3px #fff;pointer-events:none}
+.selframe.is-editing{outline-style:dashed}
 .hnd{position:absolute;width:14px;height:14px;margin:-7px 0 0 -7px;padding:0;background:#fff;border:2px solid #1a73e8;border-radius:3px;pointer-events:auto;touch-action:none}
 .hnd::after{content:"";position:absolute;inset:-8px}
 .hnd-nw{left:0;top:0;cursor:nwse-resize}.hnd-ne{left:100%;top:0;cursor:nesw-resize}.hnd-sw{left:0;top:100%;cursor:nesw-resize}.hnd-se{left:100%;top:100%;cursor:nwse-resize}
