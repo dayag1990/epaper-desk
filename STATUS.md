@@ -12,6 +12,7 @@ Start: 2026-11-23 22:58 IST (2026-11-23 17:28 UTC) · Demo-ready target: 2026-11
 - Sub-agent (Sonnet) · M0: compose, Prisma, auth, pg-boss, files, health (branch m0)
 - Sub-agent (Sonnet) · toolchain proof + stand-in fixtures (branch toolchain)
 ## Next
+- Before the first push: strip the `Co-Authored-By:` lines from the early local commits (none pushed yet)
 - Demo path: M0 → contracts → English ingest → edit/refit → PDF → e-paper
 ## Blocked
 ## WAITING ON OWNER    (what · why · what is stubbed meanwhile)

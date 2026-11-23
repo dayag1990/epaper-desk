@@ -136,6 +136,7 @@ This is the demo box and may become the client's server after approval. Either w
 ## Working rules
 
 - `main` always deploys. Small commits. Push to the private Git remote after every green step.
+- No `Co-Authored-By:` lines in commit messages (owner's rule). Sub-agent briefs must say so too.
 - Every deploy is a tagged release (`YYYY-MM-DD.N`) so the ops desk can roll back. Keep the last 5.
 - Migrations are expand-only: add, never rename or drop in the same release.
 - Contracts D1–D5 and D9 are frozen as zod in `packages/core` before module work starts. Add fields freely. Never rename or re-type one.
