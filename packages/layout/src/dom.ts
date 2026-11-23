@@ -13,6 +13,10 @@ export interface FillArgs {
 }
 /** Prototype fillOf(): optionally sets the body size first. Returns the fill ratio (1 = full). */
 export function domFill(a: FillArgs): number {
+  // Never measure with a fallback font: font-display is block, so an unloaded face would give a wrong fill %.
+  document.fonts.forEach((f) => {
+    if (f.status !== "loaded") throw new Error(`Font "${f.family}" is ${f.status}, not loaded: wait for domReady() before measuring.`);
+  });
   const page = document.querySelector(".page") as HTMLElement;
   if (a.fsPx != null) {
     page.dataset.fs = String(a.fsPx);
@@ -100,6 +104,11 @@ export function domFrames(): RawPage {
 
 /** Wait for fonts and images, so measuring happens after layout settles. */
 export async function domReady(): Promise<void> {
+  // A face is fetched lazily, when text first needs it, and fonts.ready can resolve before that starts:
+  // ask for every declared face explicitly, then wait for anything still in flight.
+  const faces: FontFace[] = [];
+  document.fonts.forEach((f) => faces.push(f));
+  await Promise.all(faces.map((f) => f.load().catch(() => null)));
   await document.fonts.ready;
   await Promise.all(
     Array.from(document.images).map((i) => (i.complete ? 0 : new Promise((r) => { i.onload = i.onerror = () => r(0); }))),

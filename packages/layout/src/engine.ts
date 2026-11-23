@@ -3,6 +3,7 @@ import { LayoutSnapshotSchema, type Article, type LayoutSnapshot, type PageDoc }
 import { domFill, domFrames, domReady, type RawFrame } from "./dom.js";
 import { fitBodySizeAsync, lowResCheck, type FitResult } from "./fit.js";
 import { renderDocument, renderPage, type RenderOptions } from "./render.js";
+import { SERVER_FONT_BASE, installFonts } from "./fonts.js";
 import type { Template } from "./template.js";
 import { pxToPt, ptToPx, round } from "./units.js";
 
@@ -43,7 +44,12 @@ export class LayoutEngine {
   static async launch(): Promise<LayoutEngine> {
     const browser = await chromium.launch();
     const ctx = await browser.newContext({ viewport: { width: 1600, height: 1200 }, deviceScaleFactor: 1 });
-    return new LayoutEngine(browser, await ctx.newPage());
+    return LayoutEngine.fromPage(browser, await ctx.newPage());
+  }
+  /** An engine on a page of a browser somebody else owns (the worker's pool). Installs the font route. */
+  static async fromPage(browser: Browser, page: Page): Promise<LayoutEngine> {
+    await installFonts(page);
+    return new LayoutEngine(browser, page);
   }
   async close(): Promise<void> {
     await this.browser.close();
@@ -51,7 +57,7 @@ export class LayoutEngine {
 
   /** Load one page into Chromium and wait until fonts and images settle. */
   async load(doc: PageDoc, t: Template, articles: readonly Article[] = [], opts: RenderOptions = {}): Promise<void> {
-    const r = renderPage(doc, t, articles, opts);
+    const r = renderPage(doc, t, articles, { fontBase: SERVER_FONT_BASE, ...opts });
     await this.page.setContent(renderDocument([r], `page ${doc.page.no}`), { waitUntil: "load" });
     await this.page.evaluate(domReady);
   }

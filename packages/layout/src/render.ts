@@ -1,7 +1,7 @@
 import type { Article, PageDoc, PageItem } from "@epaper/core";
 import { packSpans } from "./pack.js";
 import { paperCss } from "./css.js";
-import type { Template } from "./template.js";
+import { colsForSpan, type Template } from "./template.js";
 import { ptToPx, round } from "./units.js";
 
 export const esc = (s: unknown): string =>
@@ -12,6 +12,8 @@ export interface RenderOptions {
   editable?: boolean;
   /** Override the body size (px on the template canvas); default comes from doc.page.body_pt. */
   bodyPx?: number;
+  /** URL prefix the template's web fonts are served from (editor: "/fonts" on the API origin; server: see fonts.ts). */
+  fontBase?: string;
 }
 export interface RenderedPage {
   html: string; // one <div class="page">…</div>
@@ -58,7 +60,7 @@ function storyHtml(item: PageItem, span: number, articles: readonly Article[], t
   const kind = item.kind;
   const ed = editable ? ` contenteditable="true" spellcheck="false"` : "";
   const ph = (s: string) => (editable ? ` data-ph="${esc(s)}"` : "");
-  const cols = kind === "ad" ? (item.cols ?? 1) : (item.cols ?? span);
+  const cols = kind === "ad" ? (item.cols ?? 1) : (item.cols ?? colsForSpan(span, t));
   const hs = item.hs ?? 1;
   const ar = item.image?.ratio ?? defaultRatio(kind, span);
   const style = `--span:${span};--cols:${cols};--hs:${hs};--ar:${ar}`;
@@ -104,9 +106,9 @@ export function renderPage(doc: PageDoc, template: Template, articles: readonly 
   const stories = doc.items.map((it, n) => storyHtml(it, spans[n]!, articles, t, editable)).join("");
   const minH = Math.round((t.canvas_px * doc.page.h_mm) / doc.page.w_mm);
   const html =
-    `<div class="page" data-page="${doc.page.no}" data-template="${esc(doc.page.template)}" data-fs="${bodyPx}" style="min-height:${minH}px;--fs:${bodyPx}px;--z:1">` +
+    `<div class="page"${t.lang ? ` lang="${esc(t.lang)}"` : ""} data-page="${doc.page.no}" data-template="${esc(doc.page.template)}" data-fs="${bodyPx}" style="min-height:${minH}px;--fs:${bodyPx}px;--z:1">` +
     `<div class="sheet">${head}<div class="grid">${stories}</div></div></div>`;
-  return { html, css: paperCss(t), spans, bodyPx };
+  return { html, css: paperCss(t, { fontBase: opts.fontBase }), spans, bodyPx };
 }
 
 /** A full HTML document holding one or more rendered pages (what Chromium loads). */

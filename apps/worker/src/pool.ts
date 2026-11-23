@@ -43,8 +43,8 @@ class RenderPool {
       eng = this.idle.pop();
       if (!eng) {
         const ctx = await b.newContext({ viewport: { width: 1600, height: 1200 }, deviceScaleFactor: 1 });
-        // LayoutEngine.launch() starts a browser of its own; the constructor is private but takes (browser, page), which is what shares ours.
-        eng = new (LayoutEngine as any)(b, await ctx.newPage()) as LayoutEngine;
+        // LayoutEngine.launch() starts a browser of its own; fromPage shares ours (and routes the template fonts).
+        eng = await LayoutEngine.fromPage(b, await ctx.newPage());
       }
       const out = await fn(eng);
       this.idle.push(eng);

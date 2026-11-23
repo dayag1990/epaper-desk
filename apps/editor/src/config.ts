@@ -29,3 +29,6 @@ export function loadConfig(): EditorConfig {
     retryMs: injected.retryMs ?? 5000,
   };
 }
+
+/** Where the page fonts come from: the API's /fonts route (same files the server renders with). */
+export const fontBase = (): string => `${loadConfig().apiBase}/fonts`;
