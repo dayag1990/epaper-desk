@@ -1,0 +1,36 @@
+# Test-only override. Use with:  docker compose -p epaper-join -f docker-compose.yml -f docker-compose.join-test.yml up -d postgres api worker
+# A separate project name, its own volumes, its own files folder, and ports 127.0.0.1:8110-8112 so the live stack is never touched.
+services:
+  postgres:
+    container_name: epaper-join-postgres
+  api:
+    image: epaper/api:join
+    container_name: epaper-join-api
+    ports: !override ["127.0.0.1:8110:8100"]
+    volumes: !override ["/srv/epaper/files-join-test:/files", "/srv/epaper/join-editor-dist:/app/apps/editor/dist:ro"] # built by scripts/join-editor-build.sh
+    extra_hosts: ["host.docker.internal:host-gateway"]
+  worker:
+    image: epaper/worker:join
+    container_name: epaper-join-worker
+    volumes: !override ["/srv/epaper/files-join-test:/files"]
+    extra_hosts: ["host.docker.internal:host-gateway"]
+  # The demo site's pages link to http://127.0.0.1:8190/..., so each container needs that address to answer.
+  # These sidecars share the api's / worker's network and serve fixtures/demo-site there (same files scripts/demo-site.sh serves).
+  demo-api:
+    image: epaper/api:join
+    container_name: epaper-join-demo-api
+    network_mode: "service:api"
+    depends_on: { api: { condition: service_healthy } }
+    volumes: ["./fixtures/demo-site:/site:ro", "./tests/join/static-site.mjs:/srv/static-site.mjs:ro"]
+    command: ["node", "/srv/static-site.mjs"]
+    user: "1001:1001"
+    restart: "no"
+  demo-worker:
+    image: epaper/api:join
+    container_name: epaper-join-demo-worker
+    network_mode: "service:worker"
+    depends_on: { worker: { condition: service_healthy } }
+    volumes: ["./fixtures/demo-site:/site:ro", "./tests/join/static-site.mjs:/srv/static-site.mjs:ro"]
+    command: ["node", "/srv/static-site.mjs"]
+    user: "1001:1001"
+    restart: "no"

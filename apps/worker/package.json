@@ -3,7 +3,23 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "scripts": { "build": "tsc -p tsconfig.json", "typecheck": "tsc -p tsconfig.json --noEmit", "start": "node dist/main.js" },
-  "dependencies": { "pg": "8.13.1", "pg-boss": "10.1.6", "zod": "3.25.30" },
-  "devDependencies": { "@types/pg": "8.11.10" }
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/main.js",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@epaper/connectors": "workspace:*",
+    "@epaper/core": "workspace:*",
+    "@epaper/epaper": "workspace:*",
+    "@epaper/export": "workspace:*",
+    "@epaper/layout": "workspace:*",
+    "pg": "8.13.1",
+    "pg-boss": "10.1.6",
+    "zod": "3.25.30"
+  },
+  "devDependencies": {
+    "@types/pg": "8.11.10"
+  }
 }
