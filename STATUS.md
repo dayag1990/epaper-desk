@@ -25,6 +25,7 @@ Start: 2026-11-23 22:58 IST (2026-11-23 17:28 UTC) · Demo-ready target: 2026-11
 - Repo · /srv/epaper/desk, git main, D7 folders, spec at docs/build-spec.json
 ## Doing
 - Sub-agent (Sonnet) · M13 ops desk: login + TOTP, lights, fix buttons, alerts (branch ops)
+- Sub-agent (Sonnet) · M12 admin console: sources + wizard, articles, editions, users, webhooks, AI switch (branch m12)
 - Sub-agent (Sonnet) · M13 backup: local WAL archive + nightly basebackup + restic to B2 every minute, restore.sh, drill (branch backup)
 ## Next
 - Load the English demo into the LIVE stack and walk beats 1–7 by hand-through-browser (Playwright screenshots); beat 8 (Punjabi cxml)
@@ -52,6 +53,7 @@ Start: 2026-11-23 22:58 IST (2026-11-23 17:28 UTC) · Demo-ready target: 2026-11
 - (decided by owner 2026-11-23) WAL-G dropped. Evidence: restic (files) backup+restore to Backblaze B2 works and is byte-identical; WAL-G 3.0.5 reads B2 (backup-list answers) but every write (`st put`, `wal-push`, `backup-push`) hangs, with and without libsodium encryption, last log line "disable 100 continue false"; during Postgres first start wal-push blocks the temporary server's shutdown ("pg_ctl: server does not shut down"). New design, same 1-minute loss target: archive_command copies each WAL segment to a local folder (archive_timeout 30 s), nightly pg_basebackup to a local folder, restic pushes files + WAL folder + basebackups to B2 every minute. Restore = latest basebackup + archived WAL replay.
 ## Cut                 (what was cut under the cut order, and when)
 ## Log                 (one line per hour, newest first)
+- 2026-11-23 · Hour 4–5 · JOIN merged, live stack rebuilt, reader on 8102; running: ops desk, backup (local WAL + restic), M12 admin. Branch `backup/pre-strip` renamed `archive-pre-strip`.
 - 2026-11-23 · Hour 3 · M9, M2 merged; backup test blocked on key ID; lead session switched to Sonnet at the owner's request (Opus for hard debugging/review only).
 - 2026-11-23 · Hour 2–3 · M6 merged; M2 started.
 - 2026-11-23 · Hour 2 · M5 merged; JOIN told the editor's exact routes.
