@@ -1,0 +1,7 @@
+body{font:18px/1.7 "Noto Serif Tamil","Noto Sans Tamil","Latha","Nirmala UI",serif;max-width:48rem;margin:0 auto;padding:1rem;color:#222}
+header{border-bottom:3px double #222;margin-bottom:1rem}header a.mast{color:#222;text-decoration:none;font-size:2.4rem;font-weight:bold}
+.strap{font:13px sans-serif;color:#a00;letter-spacing:.02em}nav a{margin-right:1rem;font-size:15px}
+h1{line-height:1.35}h2{margin-top:1.8rem;border-bottom:1px solid #ccc}.sub{color:#555;font-style:italic}.meta{font:13px sans-serif;color:#666}
+figure{margin:1rem 0}figure img{max-width:100%;height:auto}figcaption{font:13px sans-serif;color:#666}
+blockquote{border-left:4px solid #999;margin:1rem 0;padding-left:1rem;font-style:italic}blockquote.pull{font-size:1.25em}
+li{margin:.8rem 0}footer{margin-top:2rem;font:13px sans-serif;color:#666;border-top:1px solid #ccc;padding-top:.6rem}
