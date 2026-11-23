@@ -103,6 +103,15 @@ importers:
         specifier: 3.23.8
         version: 3.23.8
 
+  packages/epaper:
+    dependencies:
+      '@epaper/core':
+        specifier: workspace:*
+        version: link:../core
+      sharp:
+        specifier: 0.33.5
+        version: 0.33.5
+
   packages/export:
     dependencies:
       '@epaper/core':
