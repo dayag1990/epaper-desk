@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { MockBackend } from "./core";
+import { MockBackend, type MockSeed } from "./core";
 import { buildSeed } from "./seed";
 import { readFileSync } from "node:fs";
 import { fontContentType, fontsDir, resolveFontFile } from "@epaper/layout";
@@ -7,7 +7,13 @@ import { fontContentType, fontsDir, resolveFontFile } from "@epaper/layout";
 const port = +(process.env.MOCK_PORT ?? 8181);
 const origin = `http://127.0.0.1:${port}`;
 const seed = process.env.MOCK_SEED === "ta" ? await (await import("./seed-ta")).buildTamilSeed() : buildSeed(origin);
-const backend = new MockBackend(seed, origin);
+// a second paper (thenpothigai) with its own edition and pages: same layout, different ids and headlines
+const second = (b: MockSeed): MockSeed => ({
+  ...b,
+  edition: { id: "ed_tamil", name: "Thenpothigai · demo edition", date: "2026-11-24" },
+  pages: b.pages.map((p) => ({ ...p, id: p.id.replace("pg_", "pt_"), doc: { ...structuredClone(p.doc), items: p.doc.items.map((i) => ({ ...i, text: i.text ? { ...i.text, head: `தமிழ் · ${i.text.head}` } : i.text })) } })),
+});
+const backend = new MockBackend(seed, origin, process.env.MOCK_SEED === "ta" ? undefined : second(seed));
 const colour = (s: string) => `hsl(${[...s].reduce((a, c) => a + c.charCodeAt(0), 0) % 360} 45% 55%)`;
 
 const server = createServer(async (req, res) => {

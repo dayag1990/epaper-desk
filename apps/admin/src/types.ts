@@ -1,7 +1,8 @@
 import type { Article, Mapping } from "@epaper/core";
 
 export type Role = "owner" | "editor" | "sub" | "designer" | "viewer";
-export interface Me { paper: { id: string; slug: string; name: string }; role: Role; user_id: string | null }
+export interface PaperChoice { slug: string; name: string; lang: string; script: string; role: Role; current: boolean }
+export interface Me { paper: { id: string; slug: string; name: string; lang?: string; script?: string }; role: Role; user_id: string | null; papers?: PaperChoice[] }
 export interface Health { state: "ok" | "error" | "syncing" | "never" | "idle"; text: string }
 export interface SourceRow { id: string; name: string; kind: string; config: Record<string, unknown>; mapping: Mapping | null; schedule: string | null; last_sync_at: string | null; health: Health }
 export interface Proposal { site: string; kind: string; config: Record<string, unknown>; mapping: Mapping; confidence: number; fields: Record<string, number>; sample: Article[]; notes: string[]; errors: { ref: unknown; reasons: string[] }[] }

@@ -5,26 +5,37 @@ import { randomUUID } from "node:crypto";
 
 type Role = "owner" | "editor" | "sub" | "designer" | "viewer";
 const PORT = Number(process.env.MOCK_PORT ?? 8171);
-const USERS: Record<string, { id: string; name: string; password: string; role: Role }> = {
-  "owner@desk.test": { id: "u-owner", name: "Olga Owner", password: "owner-pass-123", role: "owner" },
-  "editor@desk.test": { id: "u-editor", name: "Ed Editor", password: "editor-pass-123", role: "editor" },
-  "viewer@desk.test": { id: "u-viewer", name: "Vic Viewer", password: "viewer-pass-123", role: "viewer" },
+const USERS: Record<string, { id: string; name: string; password: string; role: Role; papers: Record<string, Role> }> = {
+  "owner@desk.test": { id: "u-owner", name: "Olga Owner", password: "owner-pass-123", role: "owner", papers: { "daily-demo": "owner" } },
+  "editor@desk.test": { id: "u-editor", name: "Ed Editor", password: "editor-pass-123", role: "editor", papers: { "daily-demo": "editor" } },
+  "viewer@desk.test": { id: "u-viewer", name: "Vic Viewer", password: "viewer-pass-123", role: "viewer", papers: { "daily-demo": "viewer" } },
+  // belongs to two papers: owner of the English one, editor of the Tamil one
+  "multi@desk.test": { id: "u-multi", name: "Mala Multi", password: "multi-pass-123", role: "owner", papers: { "daily-demo": "owner", thenpothigai: "editor" } },
+};
+const PAPERS: Record<string, { id: string; name: string; lang: string; script: string }> = {
+  "daily-demo": { id: "p1", name: "Daily Demo", lang: "en", script: "Latn" },
+  thenpothigai: { id: "p2", name: "Thenpothigai", lang: "ta", script: "Taml" },
 };
 const WRITE: Role[] = ["owner", "editor", "sub", "designer"];
 
 const mk = (n: number, headline: string, section: string, priority: number) => ({ id: `art_${n}`, headline, section, priority, url: `https://news.test/${n}`, lang: "en", source_id: "s0", published_at: "2026-11-23T05:00:00Z", deleted_at: null as string | null, data: { subhead: `Sub ${n}`, byline: "Staff", body: [{ text: `Body of ${headline}. `.repeat(8) }] } });
-let st = fresh();
-function fresh() {
+const sessions = new Map<string, { email: string; paper: string }>();
+const states: Record<string, ReturnType<typeof fresh>> = {};
+const freshAll = () => { for (const slug of Object.keys(PAPERS)) states[slug] = fresh(slug); sessions.clear(); };
+let st: ReturnType<typeof fresh>;
+function fresh(slug: string) {
+  const P = PAPERS[slug]!;
+  const ta = slug === "thenpothigai";
   return {
-    sessions: new Map<string, string>(),
-    paper: { id: "p1", slug: "daily-demo", name: "Daily Demo", lang: "en", script: "Latn", page_w_mm: 300, page_h_mm: 450, tz: "UTC", domain: null as string | null, ai_enabled: false },
+    paper: { id: P.id, slug, name: P.name, lang: P.lang, script: P.script, page_w_mm: 300, page_h_mm: 450, tz: "UTC", domain: null as string | null, ai_enabled: false },
     aiKey: process.env.MOCK_AI_KEY === "1",
-    sources: [] as any[], articles: [mk(1, "Floods hit the coast", "news", 50), mk(2, "Cup final tonight", "sport", 40), mk(3, "Budget in brief", "business", 30)],
+    sources: [] as any[], articles: ta ? [mk(11, "கடலோரத்தில் வெள்ளம்", "news", 50), mk(12, "இன்று இரவு இறுதிப் போட்டி", "sport", 40)] : [mk(1, "Floods hit the coast", "news", 50), mk(2, "Cup final tonight", "sport", 40), mk(3, "Budget in brief", "business", 30)],
     editions: [] as any[], pages: new Map<string, any[]>(), exports: new Map<string, any[]>(), readers: new Map<string, any>(),
-    members: Object.values(USERS).map((u) => ({ user_id: u.id, role: u.role, name: u.name, email: Object.keys(USERS).find((k) => USERS[k] === u)! })),
+    members: Object.entries(USERS).filter(([, u]) => u.papers[slug]).map(([email, u]) => ({ user_id: u.id, role: u.papers[slug]!, name: u.name, email })),
     keys: [] as any[], hooks: [] as any[], deliveries: new Map<string, any[]>(), audit: [] as any[],
   };
 }
+const papersOf = (u: (typeof USERS)[string], cur: string) => Object.entries(u.papers).map(([slug, role]) => ({ slug, name: PAPERS[slug]!.name, lang: PAPERS[slug]!.lang, script: PAPERS[slug]!.script, role, current: slug === cur })).sort((a, b) => Number(b.current) - Number(a.current));
 const log = (who: string, action: string, entity: string) => st.audit.unshift({ id: String(st.audit.length + 1), at: new Date().toISOString(), who, action, entity, entity_id: null });
 
 const send = (res: ServerResponse, code: number, body: unknown, headers: Record<string, string> = {}) => { res.writeHead(code, { "content-type": "application/json", ...headers }); res.end(JSON.stringify(body)); };
@@ -46,22 +57,26 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
   const p = url.pathname, m = req.method ?? "GET";
   if (p === "/healthz") return send(res, 200, { ok: true });
   if (p === "/readyz") return send(res, 200, { ok: true });
-  if (p === "/__reset") { st = fresh(); return send(res, 200, { ok: true }); }
+  if (p === "/__reset") { freshAll(); return send(res, 200, { ok: true }); }
   if (p === "/__ai") { st.aiKey = url.searchParams.get("key") === "1"; return send(res, 200, { ok: true }); }
   const b = ["POST", "PUT", "PATCH"].includes(m) ? await body(req) : {};
 
   if (p === "/v1/auth/login" && m === "POST") {
     const u = USERS[String(b.email).toLowerCase()];
-    if (!u || u.password !== b.password) return err(res, 401, "bad_login", "That email and password do not match.");
+    const slug = b.paper ? String(b.paper) : Object.keys(u?.papers ?? {})[0];
+    if (!u || u.password !== b.password || !slug || !u.papers[slug]) return err(res, 401, "bad_login", "That email and password do not match.");
     const tok = randomUUID();
-    st.sessions.set(tok, String(b.email).toLowerCase());
+    sessions.set(tok, { email: String(b.email).toLowerCase(), paper: slug });
+    st = states[slug]!;
     log(u.name, "login", "session");
-    return send(res, 200, { ok: true, paper_id: st.paper.id, role: u.role }, { "set-cookie": `mock_session=${tok}; Path=/; HttpOnly; SameSite=Lax` });
+    return send(res, 200, { ok: true, paper_id: st.paper.id, role: u.papers[slug] }, { "set-cookie": `mock_session=${tok}; Path=/; HttpOnly; SameSite=Lax` });
   }
   const tok = /mock_session=([^;]+)/.exec(req.headers.cookie ?? "")?.[1];
-  const email = tok ? st.sessions.get(tok) : undefined;
-  const user = email ? USERS[email] : undefined;
-  if (p === "/v1/auth/logout") { if (tok) st.sessions.delete(tok); return send(res, 200, { ok: true }, { "set-cookie": "mock_session=; Path=/; Max-Age=0" }); }
+  const sess = tok ? sessions.get(tok) : undefined;
+  const base = sess ? USERS[sess.email] : undefined;
+  if (sess) st = states[sess.paper]!;
+  const user = base && sess ? { ...base, role: base.papers[sess.paper]! } : undefined;
+  if (p === "/v1/auth/logout") { if (tok) sessions.delete(tok); return send(res, 200, { ok: true }, { "set-cookie": "mock_session=; Path=/; Max-Age=0" }); }
   if (!user) return err(res, 401, "not_signed_in", "Please sign in first.");
   const need = (...roles: Role[]) => { if (roles.length && !roles.includes(user.role)) { err(res, 403, "forbidden", user.role === "viewer" ? "Viewers can look but not save. Ask an editor or the owner." : "Your role does not allow this."); return false; } return true; };
   const who = user.name;
@@ -70,7 +85,17 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
   const id = seg.find((x, i) => i > 1 && /^([0-9a-f-]{8,}|art_\d+|s\d+|u-\w+|e\d+)$/.test(x))!;
 
   switch (key) {
-    case "GET /v1/auth/me": return send(res, 200, { paper: { id: st.paper.id, slug: st.paper.slug, name: st.paper.name }, role: user.role, user_id: user.id });
+    case "GET /v1/auth/me": return send(res, 200, { paper: { id: st.paper.id, slug: st.paper.slug, name: st.paper.name, lang: st.paper.lang, script: st.paper.script }, role: user.role, user_id: user.id, papers: papersOf(base!, sess!.paper) });
+    case "GET /v1/me/papers": return send(res, 200, { items: papersOf(base!, sess!.paper) });
+    case "POST /v1/auth/switch": {
+      const to = PAPERS[String(b.paper)] && base!.papers[String(b.paper)] ? String(b.paper) : null;
+      if (!to) return err(res, 403, "no_access", "You do not have access to that paper.");
+      const old = sess!.paper;
+      sessions.set(tok!, { email: sess!.email, paper: to }); // (the real API issues a new cookie; the mock keeps one)
+      states[old]!.audit.unshift({ id: String(states[old]!.audit.length + 1), at: new Date().toISOString(), who: user.name, action: "switch.away", entity: "session", entity_id: null });
+      states[to]!.audit.unshift({ id: String(states[to]!.audit.length + 1), at: new Date().toISOString(), who: user.name, action: "switch.in", entity: "session", entity_id: null });
+      return send(res, 200, { ok: true });
+    }
     case "GET /v1/admin/paper": return send(res, 200, { ...st.paper, ai: aiView() });
     case "PATCH /v1/admin/paper": if (!need("owner")) return; Object.assign(st.paper, b); log(who, "update", "paper"); return send(res, 200, { ...st.paper, ai: aiView() });
     case "PUT /v1/admin/ai":
@@ -112,8 +137,8 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     }
     case "POST /v1/editions/:id/autoplan": {
       if (!need(...WRITE)) return;
-      const e = st.editions.find((x) => x.id === id)!; e.status = "planning";
-      setTimeout(() => { st.pages.set(e.id, [92, 78, 105, 88].map((f, i) => ({ id: `${e.id}-p${i + 1}`, no: i + 1, fit_pct: f, status: "draft" }))); e.status = "draft"; }, 700);
+      const e = st.editions.find((x) => x.id === id)!; e.status = "planning"; const sx = st;
+      setTimeout(() => { sx.pages.set(e.id, [92, 78, 105, 88].map((f, i) => ({ id: `${e.id}-p${i + 1}`, no: i + 1, fit_pct: f, status: "draft" }))); e.status = "draft"; }, 700);
       log(who, "autoplan", "edition"); return send(res, 202, { job_id: "j2", queue: "layout" });
     }
     case "GET /v1/admin/editions/:id/overview": {
@@ -126,9 +151,9 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     }
     case "POST /v1/editions/:id/exports": {
       if (!need(...WRITE)) return;
-      const list = st.exports.get(id)!; const x: any = { id: randomUUID(), format: b.format, status: "running", url: null };
+      const list = st.exports.get(id)!; const sx = st; const x: any = { id: randomUUID(), format: b.format, status: "running", url: null };
       list.unshift(x);
-      setTimeout(() => { x.status = "done"; x.url = `/v1/exports/${x.id}/download`; if (b.format === "pdf_screen") st.readers.set(id, { id, status: "ready", version: 1, publish_at: null }); }, 600);
+      setTimeout(() => { x.status = "done"; x.url = `/v1/exports/${x.id}/download`; if (b.format === "pdf_screen") sx.readers.set(id, { id, status: "ready", version: 1, publish_at: null }); }, 600);
       return send(res, 202, { id: x.id, status: "queued", job_id: "j3" });
     }
     case "POST /v1/epaper/editions/:id/publish": {
@@ -158,4 +183,5 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
   return err(res, 404, "not_found", "There is nothing at this address.");
 }
 
+freshAll();
 createServer((req, res) => { handle(req, res).catch(() => err(res, 500, "server_error", "Something went wrong on our side. Nothing was lost; please try again.")); }).listen(PORT, "127.0.0.1", () => console.log(`admin mock on 127.0.0.1:${PORT}`));

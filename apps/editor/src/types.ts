@@ -7,7 +7,11 @@ export interface Person {
   id: string;
   name: string;
 }
+export interface PaperChoice { slug: string; name: string; lang: string; script: string; role: Role; current: boolean }
+export interface EditionListItem { id: string; name: string; date: string; status: string }
 export interface Me {
+  /** Every paper this person belongs to (the switcher shows only when there are two or more). */
+  papers?: PaperChoice[];
   user: Person & { email?: string };
   role: Role;
   /** True only when a key/model is present AND an admin switched AI on. Off by default. */

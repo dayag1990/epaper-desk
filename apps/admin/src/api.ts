@@ -31,6 +31,7 @@ export class Api {
   login = (email: string, password: string, paper?: string) => this.req<{ ok: true; role: Role }>("POST", "/v1/auth/login", { email, password, ...(paper ? { paper } : {}) });
   logout = () => this.req<{ ok: true }>("POST", "/v1/auth/logout");
   me = () => this.req<Me>("GET", "/v1/auth/me");
+  switchPaper = (paper: string) => this.req<unknown>("POST", "/v1/auth/switch", { paper });
   ready = async () => { try { return (await this.f(this.base + "/readyz")).ok; } catch { return false; } };
 
   paper = () => this.req<PaperView>("GET", "/v1/admin/paper");

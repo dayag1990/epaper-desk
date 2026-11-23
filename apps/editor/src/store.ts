@@ -90,6 +90,14 @@ export class EditorStore {
     clearInterval(this.beat);
     clearInterval(this.poll);
   }
+  /** Let go of the page lock and stop the heartbeat (before leaving for another paper). Resume with setActive(). */
+  async releaseLock(): Promise<void> {
+    clearInterval(this.beat);
+    clearInterval(this.poll);
+    const old = this.lockedPage;
+    this.lockedPage = null;
+    if (old) await this.api.unlock(old).catch(() => undefined);
+  }
   templateOf = (pid: string): Template => templateFor(this.state.docs[pid]!, this.state.templates);
   private isEditable(pid: string) {
     return this.state.access[pid]?.mode === "edit";
@@ -114,7 +122,8 @@ export class EditorStore {
       if (first) await this.setActive(first);
       this.scheduleSave();
     } catch (e) {
-      this.set({ phase: "failed", error: plainError(e, "open this edition") });
+      // an edition id from another paper (or a removed one) is a plain "not found", never data
+      this.set({ phase: "failed", error: e instanceof ApiError && e.status === 404 ? "That edition was not found. It may belong to another paper, or it may have been removed." : plainError(e, "open this edition") });
     }
   }
 

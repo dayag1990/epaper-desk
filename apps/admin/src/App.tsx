@@ -3,6 +3,7 @@ import type { Api } from "./api";
 import type { Me } from "./types";
 import { ApiError, plainError } from "./lib/words";
 import { parseScreen, ROLE_WORDS, SCREEN_NAMES, screensFor, type Screen } from "./lib/roles";
+import { PaperSwitcher } from "./PaperSwitcher";
 import { Login } from "./screens/Login";
 import { Sources } from "./screens/Sources";
 import { Articles } from "./screens/Articles";
@@ -45,14 +46,14 @@ export function App({ api }: { api: Api }) {
   return (
     <div className="shell">
       <header className="top">
-        <div className="brand"><strong>{me.paper.name}</strong><StatusLight api={api} /></div>
+        <div className="brand"><strong data-testid="paper-name">{me.paper.name}</strong><StatusLight api={api} /><PaperSwitcher api={api} me={me} onSwitched={(m) => setMe(m)} /></div>
         <div className="who"><span data-testid="role" title={ROLE_WORDS[me.role]}>{me.role}</span><button className="link" onClick={logout}>Sign out</button></div>
       </header>
       <nav className="nav" aria-label="Sections">
         {screensFor(me.role).map((s) => <a key={s} href={`#/${s}`} aria-current={s === screen ? "page" : undefined}>{SCREEN_NAMES[s]}</a>)}
       </nav>
       {me.role === "viewer" && <div className="flash ok" role="note">You can look around, but not change anything. Ask an owner for more access.</div>}
-      <main>
+      <main key={me.paper.slug}>
         {screen === "sources" && <Sources {...props} />}
         {screen === "articles" && <Articles {...props} />}
         {screen === "editions" && <Editions {...props} />}
