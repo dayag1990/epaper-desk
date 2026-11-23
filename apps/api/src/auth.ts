@@ -76,3 +76,19 @@ export async function audit(
     data: { paper_id, user_id, action, entity, entity_id, before: (before ?? undefined) as any, after: (after ?? undefined) as any },
   });
 }
+
+export interface MyPaper { slug: string; name: string; lang: string; script: string; role: Role; current: boolean }
+
+/** The papers a user is an active member of (paper and membership not deleted), the current one first, then by name. */
+export async function listMyPapers(user_id: string, current_paper_id: string): Promise<MyPaper[]> {
+  const ms = await prisma.membership.findMany({ where: { user_id, deleted_at: null } });
+  if (!ms.length) return [];
+  const papers = await prisma.paper.findMany({ where: { id: { in: ms.map((m) => m.paper_id) }, deleted_at: null } });
+  const out: Array<MyPaper & { id: string }> = [];
+  for (const m of ms) {
+    const p = papers.find((x) => x.id === m.paper_id);
+    if (p) out.push({ id: p.id, slug: p.slug, name: p.name, lang: p.lang, script: p.script, role: m.role, current: p.id === current_paper_id });
+  }
+  out.sort((a, b) => Number(b.current) - Number(a.current) || a.name.localeCompare(b.name));
+  return out.map(({ id: _id, ...rest }) => rest);
+}

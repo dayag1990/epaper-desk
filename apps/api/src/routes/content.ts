@@ -5,7 +5,7 @@ import sharp from "sharp";
 import { type Article } from "@epaper/core";
 import { acceptPush, proposeMapping, testSource, PoliteFetcher, plainError } from "@epaper/connectors";
 import { prisma } from "../db.js";
-import { audit, requireRole, WRITE_ROLES, resolvePrincipal } from "../auth.js";
+import { audit, listMyPapers, requireRole, WRITE_ROLES, resolvePrincipal } from "../auth.js";
 import { config } from "../env.js";
 import { ApiError, notFound, unauthorized } from "../errors.js";
 import type { FileDriver } from "../files/index.js";
@@ -28,7 +28,7 @@ export async function queueAssets(paper_id: string, articles: Article[]) {
 }
 
 /** AI is on for a paper only when a key exists on the server AND an owner switched it on (default off). */
-async function aiOnFor(paper_id: string): Promise<boolean> {
+export async function aiOnFor(paper_id: string): Promise<boolean> {
   if (!aiKeyPresent()) return false;
   const row = await prisma.paper.findFirst({ where: { id: paper_id, deleted_at: null }, select: { ai_enabled: true } });
   return !!row?.ai_enabled;
@@ -39,7 +39,7 @@ export function contentRoutes(app: App, driver: FileDriver) {
   app.get("/v1/me", { schema: { tags: ["auth"] }, preHandler: requireRole() }, async (req) => {
     const p = req.principal!;
     const u = p.user_id ? await prisma.user.findUnique({ where: { id: p.user_id } }) : null;
-    return { user: { id: p.user_id ?? "", name: u?.name ?? "", email: u?.email }, role: p.role, ai_enabled: await aiOnFor(p.paper_id) };
+    return { user: { id: p.user_id ?? "", name: u?.name ?? "", email: u?.email }, role: p.role, ai_enabled: await aiOnFor(p.paper_id), papers: p.user_id ? await listMyPapers(p.user_id, p.paper_id) : [] };
   });
 
   // ---- the mapping wizard: paste a URL, get a proposed mapping, nothing saved ----
