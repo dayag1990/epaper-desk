@@ -1,0 +1,23 @@
+{
+	admin off
+}
+
+{$APP_HOST} {
+	reverse_proxy api:8100
+}
+
+{$OPS_HOST} {
+	reverse_proxy ops:8101
+}
+
+{$READER_HOST} {
+	reverse_proxy 127.0.0.1:8102
+}
+
+# reader placeholder (bound to 127.0.0.1:8102 on the host)
+:8102 {
+	handle /healthz {
+		respond `{"ok":true}` 200
+	}
+	respond "E-Paper reader: placeholder." 200
+}

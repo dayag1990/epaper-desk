@@ -1,0 +1,114 @@
+name: epaper
+
+# Env for every service comes from /srv/epaper/.env (never copied into the repo).
+# State lives in two places only: the postgres volume and /srv/epaper/files.
+x-app: &app
+  restart: unless-stopped
+  user: "1001:1001"
+  env_file: /srv/epaper/.env
+  security_opt: ["no-new-privileges:true"]
+  cap_drop: [ALL]
+
+services:
+  postgres:
+    <<: *app
+    user: "999:999"
+    image: postgres:17.2-bookworm
+    container_name: epaper-postgres
+    environment:
+      POSTGRES_USER: epaper
+      POSTGRES_DB: epaper
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # no published port: only the compose network reaches it
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U epaper -d epaper"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    cpus: 2
+    mem_limit: 6g
+
+  api:
+    <<: *app
+    build: { context: ., target: api }
+    image: epaper/api:dev
+    container_name: epaper-api
+    depends_on: { postgres: { condition: service_healthy } }
+    environment: &appenv
+      FILES_DRIVER: fs
+      FILES_ROOT: /files
+      JOB_RETRY_DELAY_S: "2"
+    volumes:
+      - /srv/epaper/files:/files
+    ports: ["127.0.0.1:8100:8100"]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8100/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 6s
+      retries: 12
+      start_period: 20s
+    cpus: 1.5
+    mem_limit: 3g
+
+  worker:
+    <<: *app
+    build: { context: ., target: worker }
+    image: epaper/worker:dev
+    container_name: epaper-worker
+    depends_on: { postgres: { condition: service_healthy }, api: { condition: service_healthy } }
+    environment: *appenv
+    volumes:
+      - /srv/epaper/files:/files
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 6s
+      retries: 12
+      start_period: 20s
+    cpus: 2
+    mem_limit: 8g
+
+  ops:
+    <<: *app
+    build: { context: apps/ops }
+    image: epaper/ops:dev
+    container_name: epaper-ops
+    ports: ["127.0.0.1:8101:8101"]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8101/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 4s
+      retries: 5
+    # reserved share: wins CPU contention, keeps memory guaranteed
+    cpus: 0.5
+    cpu_shares: 4096
+    mem_limit: 512m
+    mem_reservation: 256m
+
+  caddy:
+    <<: *app
+    image: caddy:2.8.4-alpine
+    container_name: epaper-caddy
+    depends_on: { api: { condition: service_healthy }, ops: { condition: service_healthy } }
+    environment:
+      XDG_DATA_HOME: /caddy/data
+      XDG_CONFIG_HOME: /caddy/config
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - /srv/epaper/caddy:/caddy
+    ports:
+      - "80:80"
+      - "443:443"
+      - "127.0.0.1:8102:8102" # reader placeholder
+    cap_add: [NET_BIND_SERVICE]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8102/healthz"]
+      interval: 10s
+      timeout: 4s
+      retries: 5
+    cpus: 0.5
+    mem_limit: 512m
+
+volumes:
+  pgdata:
