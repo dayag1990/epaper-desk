@@ -6,7 +6,7 @@ import { polite, readJson } from "./lib.mjs";
 const [list, outdir] = process.argv.slice(2);
 const items = readJson(list, []);
 fs.mkdirSync(outdir, { recursive: true });
-const W = 360, H = 240, COLS = 5, ROWS = 4, PER = COLS * ROWS;
+const W = 320, H = 213, COLS = 6, ROWS = 5, PER = COLS * ROWS;
 const cache = `${outdir}/thumbs`; fs.mkdirSync(cache, { recursive: true });
 async function thumb(f, n) {
   const p = `${cache}/${n}.jpg`;

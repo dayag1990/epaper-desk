@@ -14,7 +14,7 @@ export async function polite(url, opts = {}, { minGap = 1100, retries = 6 } = {}
     last = Date.now();
     let res;
     try {
-      res = await fetch(url, { ...opts, headers: { "User-Agent": UA, ...(opts.headers || {}) } });
+      res = await fetch(url, { signal: AbortSignal.timeout(120000), ...opts, headers: { "User-Agent": UA, ...(opts.headers || {}) } });
     } catch (e) {
       if (attempt >= retries) throw e;
       await new Promise((r) => setTimeout(r, 3000 * (attempt + 1)));

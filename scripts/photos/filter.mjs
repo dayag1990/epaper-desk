@@ -1,7 +1,7 @@
 // Apply automatic licence/content rules to candidates.json -> filtered.json (+ rejection tally).
 import { WORK_DIR, readJson, writeJson, stripHtml, classifyLicence } from "./lib.mjs";
 
-const db = readJson(`${WORK_DIR}/candidates.json`, { files: {} });
+const db = readJson(`${WORK_DIR}/cand-snapshot.json`, { files: {} });
 const PERSON = /\b(portrait|selfie|actor|actress|politician|minister|chief minister|prime minister|president|singer|cricketer|footballer|batsman|bowler|player|athlete|speech|rally|poses?|posing|wedding|bride|groom|couple|family|girl|boy|woman|women|man|men|lady|child|children|baby|student|sadhu|dancer|dancing|musician|professor|mr\.?|mrs\.?)\b/i;
 const PERSONCAT = /(portraits?|people of|actors|actresses|politicians|cricketers|footballers|singers|ministers|chief ministers|presidents|sportspeople|men of|women of|people in|persons|dancers|musicians|film directors|brides|weddings)/i;
 const MARK = /watermark|logo|signature|advertis|poster|billboard/i;

@@ -13,19 +13,22 @@ const OQ = [
 ];
 const db = readJson(`${WORK_DIR}/candidates.json`, { files: {}, done: {} });
 db.openverse ||= {};
-const titles = new Map();
+const titles = new Map(Object.entries(db.ovTitles || {}));
+const ovDone = new Set(Object.keys(db.openverse));
 for (const [q, sections] of OQ) {
   if (db.openverse[q] !== undefined) continue;
-  const p = new URLSearchParams({ q, source: "wikimedia", license: "cc0,pdm,by,by-sa", page_size: "20", extension: "jpg", size: "large" });
+  const p = new URLSearchParams({ q, source: "wikimedia", page_size: "20" });
   let j; try { j = await getJson("https://api.openverse.org/v1/images/?" + p); } catch (e) { console.error("OV FAIL", q, e.message); continue; }
   db.openverse[q] = (j.results || []).length;
   for (const r of j.results || []) {
+    if (!["cc0", "pdm", "by", "by-sa"].includes(r.license)) continue;
     const m = /commons\.wikimedia\.org\/wiki\/(File:.+)$/.exec(r.foreign_landing_url || "");
     if (!m) continue;
     const t = decodeURIComponent(m[1]).replace(/_/g, " ");
     titles.set(t, { sections, ovLicense: `${r.license} ${r.license_version}`, ovId: r.id, q });
   }
   console.log("OV", db.openverse[q], q);
+  db.ovTitles ||= {}; for (const [t, m] of titles) db.ovTitles[t] = m; writeJson(`${WORK_DIR}/candidates.json`, db);
 }
 const need = [...titles.keys()].filter((t) => !db.files[t] || true);
 for (let k = 0; k < need.length; k += 40) {

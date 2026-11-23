@@ -2,11 +2,13 @@
 // append to fixtures/demo-site-ta/photo-credits.json. usage: node download.mjs selected.json
 import fs from "node:fs";
 import crypto from "node:crypto";
+import { execFileSync } from "node:child_process";
 import sharp from "sharp";
-import { polite, ASSET_DIR, WORK_DIR, readJson, writeJson, stripHtml, shortenCredit, classifyLicence } from "./lib.mjs";
+import { polite, UA, ASSET_DIR, WORK_DIR, readJson, writeJson, stripHtml, shortenCredit, classifyLicence } from "./lib.mjs";
 
 const CREDITS = new URL("../../fixtures/demo-site-ta/photo-credits.json", import.meta.url).pathname;
 const REJ = `${WORK_DIR}/download-rejects.json`;
+const PACE_MS = 8000;
 const sel = readJson(process.argv[2], []);
 const cands = readJson(`${WORK_DIR}/candidates.json`, { files: {} }).files;
 fs.mkdirSync(ASSET_DIR, { recursive: true });
@@ -32,9 +34,24 @@ for (const title of sel) {
   if (!pageOk) { fail("page-licence-unconfirmed-or-restricted"); continue; }
 
   // 2) download original
-  const res = await polite(f.url, {}, { minGap: 2000 });
-  if (!res.ok) { fail("download-failed-" + res.status); continue; }
-  const buf = Buffer.from(await res.arrayBuffer());
+  // Originals are fetched with curl: upload.wikimedia.org answers 429 to Node's fetch fingerprint but not to curl.
+  // On 429 we honour Retry-After (plus margin) and try again; originals are paced at >= PACE_MS apart.
+  await new Promise((r) => setTimeout(r, PACE_MS));
+  const tmp = `${WORK_DIR}/dl.tmp`, hdr = `${WORK_DIR}/dl.hdr`;
+  let buf = null, lastErr = "";
+  for (let attempt = 0; attempt < 8 && !buf; attempt++) {
+    let code = "000";
+    try {
+      code = execFileSync("curl", ["-sS", "-m", "300", "--speed-time", "30", "--speed-limit", "20000", "-A", UA, "-D", hdr, "-o", tmp, "-w", "%{http_code}", f.url.replace(/\?.*$/, "")], { stdio: ["ignore", "pipe", "pipe"] }).toString();
+    } catch (e) { lastErr = String(e.message).slice(0, 80); }
+    if (code === "200") { buf = fs.readFileSync(tmp); break; }
+    const ra = Number(/retry-after:\s*(\d+)/i.exec(fs.existsSync(hdr) ? fs.readFileSync(hdr, "utf8") : "")?.[1] || 0);
+    lastErr = lastErr || "HTTP " + code;
+    const wait = code === "429" ? (ra || 600) + 30 : 15 * (attempt + 1);
+    console.log(`  ${code} on ${title}; waiting ${wait}s`);
+    await new Promise((r) => setTimeout(r, wait * 1000));
+  }
+  if (!buf) { fail("download-failed " + lastErr); continue; }
   let out, meta, q = 92;
   try {
     const mk = () => sharp(buf, { limitInputPixels: false, failOn: "none" }).rotate().flatten({ background: "#ffffff" }).toColourspace("srgb");
