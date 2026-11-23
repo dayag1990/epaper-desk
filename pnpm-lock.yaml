@@ -33,6 +33,18 @@ importers:
         specifier: 3.23.8
         version: 3.23.8
 
+  packages/layout:
+    dependencies:
+      '@epaper/core':
+        specifier: workspace:*
+        version: link:../core
+      playwright:
+        specifier: 1.49.1
+        version: 1.49.1
+      zod:
+        specifier: 3.23.8
+        version: 3.23.8
+
 packages:
 
   '@emnapi/runtime@1.11.3':

@@ -1,0 +1,159 @@
+{
+  "id": "inner_a",
+  "set": "prototype-pa",
+  "name": "Demo Punjabi prototype look (inner_a)",
+  "demo_default": true,
+  "notice": "DEMO DEFAULT template. Not any client's template; replace with the paper's own before production.",
+  "role": "inner",
+  "max_stories": 50,
+  "size": {
+    "id": "broadsheet",
+    "w_mm": 381,
+    "h_mm": 578
+  },
+  "canvas_px": 1520,
+  "pad": {
+    "top": 30,
+    "right": 34,
+    "bottom": 34,
+    "left": 34
+  },
+  "columns": 8,
+  "gap": {
+    "row_px": 26,
+    "col_px": 24
+  },
+  "body": {
+    "default_px": 12.5,
+    "start_px": 13,
+    "min_px": 9.5,
+    "max_px": 18,
+    "step_px": 0.25,
+    "line_height": 1.62,
+    "col_gap_px": 20
+  },
+  "furniture": {
+    "masthead": "",
+    "tagline": "",
+    "strip": [
+      "",
+      "",
+      ""
+    ]
+  },
+  "fonts": {
+    "body": "\"Noto Sans Gurmukhi\",\"Mukta Mahee\",\"Gurmukhi MN\",\"Nirmala UI\",\"Raavi\",FreeSans,sans-serif",
+    "head": "\"Anek Gurmukhi\",\"Noto Sans Gurmukhi\",FreeSans,sans-serif",
+    "faces": []
+  },
+  "colors": {
+    "ink": "#141414",
+    "red": "#c1121f",
+    "blue": "#12357a",
+    "rule": "#1a1a1a",
+    "paper": "#fbfaf6",
+    "mast": "#c1121f"
+  },
+  "masthead_px": {
+    "name": 112,
+    "tag": 20
+  },
+  "styles": {
+    "head": "Story-head",
+    "sub": "Story-sub-head",
+    "body": "Story-body"
+  },
+  "slots": [
+    {
+      "id": "story_col_span-5-1",
+      "span": 5,
+      "cols": 5,
+      "kind": "story",
+      "words_min": 120,
+      "words_max": 9999,
+      "image": true
+    },
+    {
+      "id": "story_col_span-3-2",
+      "span": 3,
+      "cols": 3,
+      "kind": "story",
+      "words_min": 80,
+      "words_max": 300,
+      "image": true
+    },
+    {
+      "id": "story_col_span-3-3",
+      "span": 3,
+      "cols": 3,
+      "kind": "story",
+      "words_min": 60,
+      "words_max": 260,
+      "image": true
+    },
+    {
+      "id": "story_col_span-2-4",
+      "span": 2,
+      "cols": 2,
+      "kind": "story",
+      "words_min": 0,
+      "words_max": 140,
+      "image": false
+    },
+    {
+      "id": "story_col_span-3-5",
+      "span": 3,
+      "cols": 3,
+      "kind": "story",
+      "words_min": 60,
+      "words_max": 260,
+      "image": false
+    },
+    {
+      "id": "story_col_span-2-6",
+      "span": 2,
+      "cols": 2,
+      "kind": "story",
+      "words_min": 0,
+      "words_max": 120,
+      "image": false
+    },
+    {
+      "id": "sidebar",
+      "span": 2,
+      "cols": 1,
+      "kind": "side",
+      "words_min": 0,
+      "words_max": 140,
+      "image": false
+    },
+    {
+      "id": "feature-1",
+      "span": 6,
+      "cols": 3,
+      "kind": "feature",
+      "words_min": 150,
+      "words_max": 9999,
+      "image": true
+    },
+    {
+      "id": "editorial",
+      "span": 8,
+      "cols": 4,
+      "kind": "edit",
+      "words_min": 100,
+      "words_max": 9999,
+      "image": false
+    },
+    {
+      "id": "adverts-1",
+      "span": 8,
+      "cols": 1,
+      "kind": "ad",
+      "words_min": 0,
+      "words_max": 0,
+      "image": true
+    }
+  ],
+  "css_extra": ""
+}
