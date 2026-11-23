@@ -23,11 +23,11 @@ class DbArticleStore implements ArticleStore {
   }
   async put(a: Article) {
     const paper_id = stripRef(a.paper_id), source_id = stripRef(a.source_id);
-    const cols = { url: a.url, lang: a.lang, section: a.section, priority: a.priority, headline: a.headline, content_hash: a.content_hash, rev: a.rev, data: a as any, published_at: new Date(a.published_at), deleted_at: null };
+    const cols = { url: a.url, lang: a.lang, section: a.section, priority: a.priority, headline: a.headline, content_hash: a.content_hash, rev: a.rev, data: a as any, published_at: new Date(a.published_at) };
     await prisma.article.upsert({
       where: { paper_id_source_id_external_id: { paper_id, source_id, external_id: a.external_id } },
-      create: { id: a.id, paper_id, source_id, external_id: a.external_id, ...cols },
-      update: cols,
+      create: { id: a.id, paper_id, source_id, external_id: a.external_id, ...cols, deleted_at: null },
+      update: cols, // keeps deleted_at: a story an editor hid stays hidden when its source changes
     });
   }
 }

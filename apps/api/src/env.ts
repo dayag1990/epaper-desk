@@ -12,5 +12,4 @@ export const config = {
   filesDriver: process.env.FILES_DRIVER ?? "fs",
   filesRoot: process.env.FILES_ROOT ?? "/files",
   sessionDays: 14,
-  aiEnabled: process.env.AI_ENABLED === "true",
 };

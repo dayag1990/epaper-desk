@@ -1,3 +1,4 @@
+import { aiKeyPresent } from "../lib/admin.js";
 import { z } from "zod";
 import { createHash } from "node:crypto";
 import sharp from "sharp";
@@ -26,12 +27,19 @@ export async function queueAssets(paper_id: string, articles: Article[]) {
       await enqueue("asset.fetch", paper_id, { article_id: a.id, asset_id: im.asset_id, src: im.src, caption: im.caption ?? null, credit: im.credit ?? null }, `asset:${im.asset_id}`);
 }
 
+/** AI is on for a paper only when a key exists on the server AND an owner switched it on (default off). */
+async function aiOnFor(paper_id: string): Promise<boolean> {
+  if (!aiKeyPresent()) return false;
+  const row = await prisma.paper.findFirst({ where: { id: paper_id, deleted_at: null }, select: { ai_enabled: true } });
+  return !!row?.ai_enabled;
+}
+
 export function contentRoutes(app: App, driver: FileDriver) {
   // ---- who am I (the editor opens with this) ----
   app.get("/v1/me", { schema: { tags: ["auth"] }, preHandler: requireRole() }, async (req) => {
     const p = req.principal!;
     const u = p.user_id ? await prisma.user.findUnique({ where: { id: p.user_id } }) : null;
-    return { user: { id: p.user_id ?? "", name: u?.name ?? "", email: u?.email }, role: p.role, ai_enabled: config.aiEnabled };
+    return { user: { id: p.user_id ?? "", name: u?.name ?? "", email: u?.email }, role: p.role, ai_enabled: await aiOnFor(p.paper_id) };
   });
 
   // ---- the mapping wizard: paste a URL, get a proposed mapping, nothing saved ----
@@ -165,7 +173,7 @@ export function contentRoutes(app: App, driver: FileDriver) {
     schema: { tags: ["ai"], body: z.object({ task: z.string().default("headline"), text: z.string().min(1), max_chars: z.number().int().positive().optional(), article_id: z.string().optional() }) },
     preHandler: requireRole(...WRITE_ROLES),
   }, async (req) => {
-    if (!config.aiEnabled) throw new ApiError(403, "ai_disabled", "AI help is switched off. Shorten the headline by hand; the page refits as you type.");
+    if (!(await aiOnFor(req.principal!.paper_id))) throw new ApiError(403, "ai_disabled", "AI help is switched off. Shorten the headline by hand; the page refits as you type.");
     const words = req.body.text.split(/\s+/).filter(Boolean);
     const cut = (n: number) => words.slice(0, Math.max(3, n)).join(" ");
     return { model: "rules", options: [cut(words.length - 2), cut(words.length - 4), cut(5)].map((text) => ({ text })) };

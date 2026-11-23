@@ -25,6 +25,7 @@ import { editionRoutes } from "./routes/editions.js";
 import { exportRoutes } from "./routes/exports.js";
 import { epaperRoutes } from "./routes/epaper.js";
 import { publicRoutes } from "./routes/public.js";
+import { adminRoutes } from "./routes/admin-index.js";
 import { serveEditor } from "./lib/static.js";
 
 export async function buildApp() {
@@ -84,6 +85,8 @@ export async function buildApp() {
   await app.register(async (s) => exportRoutes(s.withTypeProvider<ZodTypeProvider>(), driver));
   await app.register(async (s) => epaperRoutes(s.withTypeProvider<ZodTypeProvider>(), driver));
   await app.register(async (s) => publicRoutes(s.withTypeProvider<ZodTypeProvider>(), driver));
+
+  await app.register(async (s) => adminRoutes(s.withTypeProvider<ZodTypeProvider>()));
 
   app.addHook("onReady", async () => {
     await ensureQueues(await getBoss());
