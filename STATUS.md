@@ -6,9 +6,11 @@ Start: 2026-11-23 22:58 IST (2026-11-23 17:28 UTC) · Demo-ready target: 2026-11
 - Host · Docker 29.10 + Compose 5.8 from Docker's apt repo; `docker run hello-world` as epaper passed
 - Host · Node 22.23, pnpm 9.15.4, Poppler 24.02 installed
 - Host · ufw on: only 22, 80, 443 open
+- Contracts · D1–D6, D9, D10 frozen as zod in packages/core; 27 tests pass, re-run by lead before merge
 - Repo · /srv/epaper/desk, git main, D7 folders, spec at docs/build-spec.json
 ## Doing
-- Sub-agent (Sonnet) · packages/core: contracts D1–D5, D6, D9, D10 as zod + tests (branch core)
+- Sub-agent (Sonnet) · M4 layout engine, ported from the prototype (branch m4)
+- Sub-agent (Sonnet) · M1 connectors + rule-based mapping wizard (branch m1)
 - Sub-agent (Sonnet) · M0: compose, Prisma, auth, pg-boss, files, health (branch m0)
 - Sub-agent (Sonnet) · toolchain proof + stand-in fixtures (branch toolchain)
 ## Next
@@ -29,5 +31,6 @@ Start: 2026-11-23 22:58 IST (2026-11-23 17:28 UTC) · Demo-ready target: 2026-11
 ## DECISION NEEDED
 ## Cut                 (what was cut under the cut order, and when)
 ## Log                 (one line per hour, newest first)
+- 2026-11-23 · Hour 0 · contracts merged to main; M4 and M1 agents started.
 - 2026-11-23 · Hour 0 · host set up (swap, Docker, Node, firewall); stand-in .env; 3 Sonnet agents started on contracts, M0, toolchain.
 - 2026-11-23 17:28 UTC · Hour 0 · owner wrote "build". Clock started. Target: demo-ready at +48 h (owner instruction), contract deadline +72 h.
