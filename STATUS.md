@@ -7,23 +7,29 @@ Start: 2026-11-23 22:58 IST (2026-11-23 17:28 UTC) · Demo-ready target: 2026-11
 - Host · Node 22.23, pnpm 9.15.4, Poppler 24.02 installed
 - Host · ufw on: only 22, 80, 443 open
 - Contracts · D1–D6, D9, D10 frozen as zod in packages/core; 27 tests pass, re-run by lead before merge
+- M0 · compose stack (postgres, api, worker, ops placeholder, caddy) healthy; ports 127.0.0.1:8100–8102 + public 80/443 only (checked with ss); seed, viewer refused, retry×3 → dead-letter, paper isolation, stop/start keeps rows+files+jobs (11 tests, re-run by lead)
+- M1 · cxml/rss/wordpress/scrape/push adapters; BlinkCMS → 9 stories + 1 ad + 7 image refs; rule-based wizard maps 3 unseen sites incl. demo site; re-sync writes nothing; edit bumps rev (30 tests, re-run by lead). NOT YET: cron scheduler, file-drop watcher, /v1/sources (JOIN agent)
+- M7 · screen PDF exact page box to 0.1 mm, fonts embedded, text selectable; ContentXML round-trips (6 tests, re-run by lead). NOT YET: press PDF (needs client press profile; stays experimental)
+- M8 · 24-page PDF → webp levels + text + D5 zones in ~10 s; 96/96 stories zoned on the stand-in; re-run writes nothing (8 tests, re-run by lead). NOT YET: Punjabi legacy-font PDF, live page replace (JOIN)
+- All packages · 83 tests pass together on main
 - M4 · layout engine ported; prototype SAMPLE matches exactly; 15 English → 4 pages in ~1 s; same plan every run; editor vs headless <0.5 % pixels; D4 snapshot valid (12 tests, re-run by lead). NOT YET: Punjabi page 2 overflow check (fonts were missing; Noto Gurmukhi now installed on host — must also go into the images)
 - Toolchain · Postgres 17.2, Node 22.12, Playwright 1.49.1 Chromium, sharp 0.33.5, Poppler, qpdf 11.3, WAL-G 3.0.5, restic 0.17.3 all PASS on amd64 (docs/toolchain.md). WAL archiving not yet proven: base backup only
 - Fixtures · stand-ins: english-15.json (15 valid D1 articles, re-checked by lead), demo-site, edition-24p.pdf (24 pages, text layer)
 - Repo · Co-Authored-By lines stripped from the 3 early commits on main (tree unchanged; backup branch backup/pre-strip)
 - Repo · /srv/epaper/desk, git main, D7 folders, spec at docs/build-spec.json
 ## Doing
-- Sub-agent (Sonnet) · M7 screen PDF + ContentXML export (branch m7)
-- Sub-agent (Sonnet) · M5 editor, ported tools, live refit, save/versions/locks (branch m5)
-- Sub-agent (Sonnet) · M1 connectors + rule-based mapping wizard (branch m1)
-- Sub-agent (Sonnet) · M0: compose, Prisma, auth, pg-boss, files, health (branch m0)
-- Sub-agent (Sonnet) · M8 e-paper pipeline: PDF → images, text, zones (branch m8)
+- Sub-agent (Sonnet) · M5 editor: ported tools, live refit, save/versions/locks (branch m5)
+- Sub-agent (Sonnet) · JOIN: API routes + worker queues wiring M1 → M4 → M5 → M7 → M8 → reader API, English e2e test (branch join)
+- Sub-agent (Sonnet) · M9 reader PWA + M10 embed.js (branch m9)
+- Sub-agent (Sonnet) · M6 IDML export + structural validator (branch m6)
 ## Next
 - M4 follow-up: auto-plan balances unevenly (one page at 60 % fill); re-check Punjabi overflow with fonts
 - Bake Noto fonts (Gurmukhi + Latin) into the render images / templates/fonts
 - Merging an agent branch: rebase it onto main first. Old base 46d141a → new 0e09a2f (m0, toolchain); old d985ecf → new b9a7234 (m4, m1). Drop any Co-Authored-By line from the branch's own commits.
 - Demo path: M0 → contracts → English ingest → edit/refit → PDF → e-paper
 ## Blocked
+## Incidents
+- 2026-11-23 18:4x UTC · an unanchored `files/` ignore rule hid apps/api/src/files; removing the m0 worktree deleted it. Restored from the built api image (complete, 1 file), committed, rule anchored to `/files/`. Rule now: check `git status --ignored` before removing any worktree.
 ## WAITING ON OWNER    (what · why · what is stubbed meanwhile)
 - Hostnames APP_HOST, OPS_HOST, READER_HOST + DNS records · needed for public TLS · stand-in app.localhost, ops.localhost, epaper.localhost
 - Off-box bucket: BACKUP_S3_ENDPOINT, _BUCKET, _KEY, _SECRET · backups must leave the box · stand-in: local folder /srv/epaper/backup-standin (ON THE BOX: red until real bucket)
@@ -38,6 +44,7 @@ Start: 2026-11-23 22:58 IST (2026-11-23 17:28 UTC) · Demo-ready target: 2026-11
 ## DECISION NEEDED
 ## Cut                 (what was cut under the cut order, and when)
 ## Log                 (one line per hour, newest first)
+- 2026-11-23 · Hour 1–2 · M0, M1, M7, M8 merged (83 package tests green on main); stack rebuilt from main; JOIN, M9, M6 started.
 - 2026-11-23 · Hour 1 · M4 merged; M7 and M5 started. Running: M0, M1, M5, M7, M8.
 - 2026-11-23 · Hour 0–1 · toolchain + fixtures merged; M8 started. Running: M0, M1, M4, M8.
 - 2026-11-23 · Hour 0 · contracts merged to main; M4 and M1 agents started.
