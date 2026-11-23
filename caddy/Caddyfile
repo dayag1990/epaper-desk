@@ -14,10 +14,17 @@
 	reverse_proxy 127.0.0.1:8102
 }
 
-# reader placeholder (bound to 127.0.0.1:8102 on the host)
+# reader + embed.js (bound to 127.0.0.1:8102 on the host); public read API goes to the api
 :8102 {
 	handle /healthz {
 		respond `{"ok":true}` 200
 	}
-	respond "E-Paper reader: placeholder." 200
+	handle /v1/public/* {
+		reverse_proxy api:8100
+	}
+	handle {
+		root * /srv/reader
+		try_files {path} /index.html
+		file_server
+	}
 }

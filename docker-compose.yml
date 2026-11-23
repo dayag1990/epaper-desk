@@ -98,11 +98,12 @@ services:
       XDG_CONFIG_HOME: /caddy/config
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./apps/reader/dist:/srv/reader:ro # built by `pnpm --filter @epaper/reader build`
       - /srv/epaper/caddy:/caddy
     ports:
       - "80:80"
       - "443:443"
-      - "127.0.0.1:8102:8102" # reader placeholder
+      - "127.0.0.1:8102:8102" # reader
     cap_add: [NET_BIND_SERVICE]
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8102/healthz"]
