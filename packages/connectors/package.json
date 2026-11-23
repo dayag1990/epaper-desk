@@ -1,0 +1,21 @@
+{
+  "name": "@epaper/connectors",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
+  "files": ["dist"],
+  "scripts": {
+    "build": "pnpm --filter @epaper/core run build && tsc -p tsconfig.json",
+    "test": "vitest run",
+    "typecheck": "pnpm --filter @epaper/core run build && tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@epaper/core": "workspace:*",
+    "@xmldom/xmldom": "0.9.6",
+    "cheerio": "1.0.0",
+    "fast-xml-parser": "4.5.1",
+    "zod": "3.23.8"
+  }
+}
