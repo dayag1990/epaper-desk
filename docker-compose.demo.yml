@@ -1,0 +1,43 @@
+# Demo helper (profile `demo`): serves fixtures/demo-site read-only on the epaper compose network
+# at http://demo-site:8190, so the API's wizard can fetch it (the host firewall blocks containers
+# from reaching host ports). No published ports. Adds one service; others untouched.
+#
+#   docker compose -p epaper -f docker-compose.yml -f docker-compose.demo.yml --profile demo up -d demo-site
+services:
+  demo-site:
+    profiles: ["demo"]
+    image: caddy:2.8.4-alpine
+    container_name: epaper-demo-site
+    restart: unless-stopped
+    user: "1001:1001"
+    # The fixture pages carry absolute http://127.0.0.1:8190 links. The copy served here (in RAM, the
+    # mount stays read-only) is rewritten in two ways:
+    #   pictures                  -> http://demo-site:8190/img/...  (the worker fetches them inside the compose network)
+    #   every other link (article, sitemap, canonical) -> ${DEMO_PUBLIC_BASE}/demo-site/...
+    # so tapping a story in the reader opens a page the OWNER'S browser can reach: Caddy forwards
+    # /demo-site/* on port 8102 to this container. Default base: http://localhost:8102
+    command:
+      - sh
+      - -c
+      - |
+        cp -r /site /tmp/site
+        find /tmp/site -type f \( -name '*.html' -o -name '*.xml' -o -name '*.txt' -o -name '*.css' \) -exec sed -i -e 's#http://127.0.0.1:8190/img/#http://demo-site:8190/img/#g' -e "s#http://127.0.0.1:8190#$${DEMO_PUBLIC_BASE:-http://localhost:8102}/demo-site#g" {} +
+        exec caddy file-server --root /tmp/site --listen :8190
+    environment:
+      DEMO_PUBLIC_BASE: ${DEMO_PUBLIC_BASE:-http://localhost:8102}
+      XDG_DATA_HOME: /tmp/caddy-data
+      XDG_CONFIG_HOME: /tmp/caddy-config
+    volumes:
+      - ./fixtures/demo-site:/site:ro
+    read_only: true
+    tmpfs: ["/tmp:size=64m,uid=1001,gid=1001"]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE] # the caddy binary carries this file capability
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8190/rss.xml"]
+      interval: 10s
+      timeout: 4s
+      retries: 5
+    cpus: 0.25
+    mem_limit: 128m

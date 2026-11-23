@@ -52,10 +52,18 @@ if (!src) {
 }
 step(3, `source ready`);
 
+const syncedBefore = (await call("GET", `/v1/sources/${src.id}`)).json.last_sync_at ?? null;
 r = await call("POST", `/v1/sources/${src.id}/sync`);
 if (r.status >= 300) fail("could not start the sync", r);
-const arts = await until("15 articles", async () => { const a = (await call("GET", "/v1/articles")).json.items ?? []; return a.length >= 15 ? a : null; });
-step(4, `${arts.length} articles ingested (${secs()})`);
+// wait for THIS sync to finish (a re-run must not race ahead on the articles that are already there)
+const synced = await until("the sync to finish", async () => {
+  const s = (await call("GET", `/v1/sources/${src.id}`)).json;
+  if (String(s.status).startsWith("error")) fail("the sync failed: " + s.status);
+  return s.last_sync_at && s.last_sync_at !== syncedBefore && String(s.status).startsWith("ok") ? s : null;
+});
+const arts = (await call("GET", "/v1/articles")).json.items ?? [];
+if (arts.length < 15) fail(`only ${arts.length} articles after the sync`);
+step(4, `${arts.length} articles ingested; ${synced.status} (${secs()})`);
 
 r = await call("POST", "/v1/editions", { paper: SLUG, date: DATE, template_set: "broadsheet-en", name: "Main" });
 if (r.status >= 300) fail("could not create the edition", r);

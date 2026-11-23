@@ -97,7 +97,7 @@ services:
       XDG_DATA_HOME: /caddy/data
       XDG_CONFIG_HOME: /caddy/config
     volumes:
-      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./caddy:/etc/caddy:ro # the folder, not the one file: an edited Caddyfile is then seen at once
       - ./apps/reader/dist:/srv/reader:ro # built by `pnpm --filter @epaper/reader build`
       - /srv/epaper/caddy:/caddy
     ports:

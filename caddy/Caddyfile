@@ -22,6 +22,10 @@
 	handle /v1/public/* {
 		reverse_proxy api:8100
 	}
+	# demo only: the stand-in news site, so a tapped story opens in the owner's browser
+	handle_path /demo-site/* {
+		reverse_proxy demo-site:8190
+	}
 	handle {
 		root * /srv/reader
 		try_files {path} /index.html
