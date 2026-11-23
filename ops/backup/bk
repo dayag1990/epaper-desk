@@ -92,6 +92,7 @@ cmd_basebackup() {
     --arg pgv "$(pg_basebackup --version | awk '{print $NF}')" \
     '{name:$name, started:$st, finished:$fin, start_wal:$sw, size_bytes:$sz, postgres:$pgv, format:"tar+gzip, wal streamed", files:$files}' > "$tmp/manifest.json"
   sync -f "$tmp/manifest.json" 2>/dev/null || true
+  chmod -R a+rX "$tmp"   # the database container (another uid) reads these when restoring
   mv "$tmp" "$final" || { st_err basebackup "Could not finish the base backup folder."; return 1; }
   retain_basebackups "$KEEP_BASEBACKUPS"
   st_set '.basebackup.last_ok=$now | .basebackup.size_bytes=($sz|tonumber) | .basebackup.name=$n | .basebackup.kept=($k|tonumber)' \
@@ -126,7 +127,7 @@ cmd_check() {
     if [ "$age" -lt 93600 ]; then say "OK: the newest base backup is $((age/3600)) hours old."; else say "FAIL: the newest base backup is $((age/3600)) hours old (limit 26)."; bad=1; fi
   else say "FAIL: there is no complete base backup."; bad=1; fi
   if [ "${CHECK_SKIP_DATA:-0}" = 1 ]; then say "SKIP: data read test."
-  elif out=$(timeout 1200 restic check --read-data-subset=1% 2>&1); then say "OK: restic check read 1% of the stored data and found no damage."
+  elif out=$(timeout 1200 restic check --no-lock --read-data-subset=1% 2>&1); then say "OK: restic check read 1% of the stored data and found no damage."
   else say "FAIL: restic check found a problem: $(tail -1 <<<"$out" | cut -c1-140)."; bad=1; fi
   return $bad
 }

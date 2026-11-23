@@ -98,6 +98,7 @@ if [ -f "$RT/run/epaper.env" ]; then
   [ -e "$ROOT/.env" ] || install -m 600 "$RT/run/epaper.env" "$ROOT/.env"
   [ -e /srv/epaper/.env ] || { install -d /srv/epaper 2>/dev/null; install -m 600 "$RT/run/epaper.env" /srv/epaper/.env 2>/dev/null || true; }
 fi
+chmod -R a+rX "$ROOT/basebackups" "$ROOT/walarchive" 2>/dev/null || true
 BACKUP_ROOT=$ROOT "$REPO_DIR/scripts/backup-init.sh" >/dev/null
 say "files restored: $(find "$ROOT/files" -type f | wc -l) files"
 
