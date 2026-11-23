@@ -1,0 +1,17 @@
+{
+  "name": "@epaper/epaper",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
+  "files": ["dist"],
+  "scripts": {
+    "prebuild": "pnpm --filter @epaper/core run build",
+    "build": "tsc -p tsconfig.json",
+    "pretypecheck": "pnpm --filter @epaper/core run build",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": { "@epaper/core": "workspace:*", "sharp": "0.33.5" }
+}
