@@ -90,19 +90,29 @@ export function toIso(input: unknown, assumeUtc = true): string | undefined {
   return d.toISOString().replace(/\.\d{3}Z$/, "Z");
 }
 
-/** Pick the script name from the text itself (ISO 15924). */
+/** Pick the script name from the text itself (ISO 15924), and the usual language for it.
+ *  A script can serve several languages (Devanagari: hi/mr/ne, Arabic: ur/ar/fa); the first is the default and a
+ *  source mapping can always override it with `lang: const:xx`. */
 export function detectScript(text: string): { lang: string; script: string } {
   const counts: Record<string, number> = {};
   const ranges: [string, RegExp][] = [
-    ["Guru", /[਀-੿]/g],
-    ["Deva", /[ऀ-ॿ]/g],
-    ["Arab", /[؀-ۿ]/g],
+    ["Taml", /[\u0B80-\u0BFF]/g],
+    ["Telu", /[\u0C00-\u0C7F]/g],
+    ["Knda", /[\u0C80-\u0CFF]/g],
+    ["Mlym", /[\u0D00-\u0D7F]/g],
+    ["Beng", /[\u0980-\u09FF]/g],
+    ["Gujr", /[\u0A80-\u0AFF]/g],
+    ["Orya", /[\u0B00-\u0B7F]/g],
+    ["Sinh", /[\u0D80-\u0DFF]/g],
+    ["Guru", /[\u0A00-\u0A7F]/g],
+    ["Deva", /[\u0900-\u097F]/g],
+    ["Arab", /[\u0600-\u06FF]/g],
     ["Latn", /[A-Za-z]/g],
   ];
   for (const [name, re] of ranges) counts[name] = (text.match(re) ?? []).length;
   const best = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
   const script = best && best[1] > 0 ? best[0] : "Latn";
-  const lang = { Guru: "pa", Deva: "hi", Arab: "ur", Latn: "en" }[script] ?? "en";
+  const lang = ({ Taml: "ta", Telu: "te", Knda: "kn", Mlym: "ml", Beng: "bn", Gujr: "gu", Orya: "or", Sinh: "si", Guru: "pa", Deva: "hi", Arab: "ur", Latn: "en" } as Record<string, string>)[script] ?? "en";
   return { lang, script };
 }
 
