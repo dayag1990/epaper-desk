@@ -148,12 +148,12 @@ test("owner: AI is off and disabled without a key; works with a key; people, key
   await sw.click();
   await expect(page.getByTestId("ai-state")).toContainText("AI help is off");
 
-  await page.getByRole("link", { name: "People" }).click();
-  await expect(page.getByTestId("member")).toHaveCount(3);
+  await page.getByRole("link", { name: "People" }).click(); // owner, editor, viewer and the two-paper person
+  await expect(page.getByTestId("member")).toHaveCount(4);
   await page.getByRole("button", { name: "Remove" }).first().click();
   await expect(page.getByRole("alertdialog")).toBeVisible();
   await page.getByRole("button", { name: "Cancel" }).click();
-  await expect(page.getByTestId("member")).toHaveCount(3);
+  await expect(page.getByTestId("member")).toHaveCount(4);
 
   // a source, a key shown once, a webhook with test and log
   await page.getByRole("link", { name: "Sources" }).click();
