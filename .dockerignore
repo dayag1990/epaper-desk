@@ -11,3 +11,6 @@ tests
 docs
 *.svg
 *.html
+# templates (incl. templates/fonts, the Tamil web fonts) must stay in the build context: api and worker both need them
+!templates
+!templates/**

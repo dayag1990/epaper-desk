@@ -10,9 +10,11 @@ FROM base AS build
 COPY . .
 RUN pnpm install --frozen-lockfile && pnpm exec prisma generate --schema prisma/schema.prisma \
  && pnpm --filter @epaper/api... --filter @epaper/worker... build
+# The Tamil web fonts must be in the image: the api serves them at /fonts, the worker renders PDFs with the same files.
+RUN test -s "templates/fonts/noto-serif-tamil/NotoSerifTamil[wdth,wght].ttf" && test -s "templates/fonts/anek-tamil/AnekTamil[wdth,wght].ttf"
 
 FROM base AS runtime
-ENV NODE_ENV=production
+ENV NODE_ENV=production FONTS_DIR=/app/templates/fonts
 COPY --from=build --chown=1001:1001 /app /app
 USER 1001:1001
 
@@ -27,7 +29,7 @@ CMD ["sh", "-c", "cd /app && node apps/api/dist/migrate.js && cd apps/api && exe
 FROM mcr.microsoft.com/playwright:v1.49.1-noble AS worker
 RUN apt-get update && apt-get install -y --no-install-recommends poppler-utils fonts-noto-core fonts-noto-ui-core \
  && rm -rf /var/lib/apt/lists/* && fc-cache -f
-ENV NODE_ENV=production HOME=/tmp PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+ENV NODE_ENV=production HOME=/tmp PLAYWRIGHT_BROWSERS_PATH=/ms-playwright FONTS_DIR=/app/templates/fonts
 COPY --from=build --chown=1001:1001 /app /app
 USER 1001:1001
 WORKDIR /app/apps/worker
