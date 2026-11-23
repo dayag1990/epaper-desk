@@ -7,16 +7,20 @@ Start: 2026-11-23 22:58 IST (2026-11-23 17:28 UTC) · Demo-ready target: 2026-11
 - Host · Node 22.23, pnpm 9.15.4, Poppler 24.02 installed
 - Host · ufw on: only 22, 80, 443 open
 - Contracts · D1–D6, D9, D10 frozen as zod in packages/core; 27 tests pass, re-run by lead before merge
+- M4 · layout engine ported; prototype SAMPLE matches exactly; 15 English → 4 pages in ~1 s; same plan every run; editor vs headless <0.5 % pixels; D4 snapshot valid (12 tests, re-run by lead). NOT YET: Punjabi page 2 overflow check (fonts were missing; Noto Gurmukhi now installed on host — must also go into the images)
 - Toolchain · Postgres 17.2, Node 22.12, Playwright 1.49.1 Chromium, sharp 0.33.5, Poppler, qpdf 11.3, WAL-G 3.0.5, restic 0.17.3 all PASS on amd64 (docs/toolchain.md). WAL archiving not yet proven: base backup only
 - Fixtures · stand-ins: english-15.json (15 valid D1 articles, re-checked by lead), demo-site, edition-24p.pdf (24 pages, text layer)
 - Repo · Co-Authored-By lines stripped from the 3 early commits on main (tree unchanged; backup branch backup/pre-strip)
 - Repo · /srv/epaper/desk, git main, D7 folders, spec at docs/build-spec.json
 ## Doing
-- Sub-agent (Sonnet) · M4 layout engine, ported from the prototype (branch m4)
+- Sub-agent (Sonnet) · M7 screen PDF + ContentXML export (branch m7)
+- Sub-agent (Sonnet) · M5 editor, ported tools, live refit, save/versions/locks (branch m5)
 - Sub-agent (Sonnet) · M1 connectors + rule-based mapping wizard (branch m1)
 - Sub-agent (Sonnet) · M0: compose, Prisma, auth, pg-boss, files, health (branch m0)
 - Sub-agent (Sonnet) · M8 e-paper pipeline: PDF → images, text, zones (branch m8)
 ## Next
+- M4 follow-up: auto-plan balances unevenly (one page at 60 % fill); re-check Punjabi overflow with fonts
+- Bake Noto fonts (Gurmukhi + Latin) into the render images / templates/fonts
 - Merging an agent branch: rebase it onto main first. Old base 46d141a → new 0e09a2f (m0, toolchain); old d985ecf → new b9a7234 (m4, m1). Drop any Co-Authored-By line from the branch's own commits.
 - Demo path: M0 → contracts → English ingest → edit/refit → PDF → e-paper
 ## Blocked
@@ -34,6 +38,7 @@ Start: 2026-11-23 22:58 IST (2026-11-23 17:28 UTC) · Demo-ready target: 2026-11
 ## DECISION NEEDED
 ## Cut                 (what was cut under the cut order, and when)
 ## Log                 (one line per hour, newest first)
+- 2026-11-23 · Hour 1 · M4 merged; M7 and M5 started. Running: M0, M1, M5, M7, M8.
 - 2026-11-23 · Hour 0–1 · toolchain + fixtures merged; M8 started. Running: M0, M1, M4, M8.
 - 2026-11-23 · Hour 0 · contracts merged to main; M4 and M1 agents started.
 - 2026-11-23 · Hour 0 · host set up (swap, Docker, Node, firewall); stand-in .env; 3 Sonnet agents started on contracts, M0, toolchain.
