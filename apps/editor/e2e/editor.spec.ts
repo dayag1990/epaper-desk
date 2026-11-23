@@ -27,7 +27,7 @@ test("edit a headline: the page refits and the fill % changes", async ({ page })
   await expect(page.getByTestId("fill-meter")).toContainText("text");
   const before = await meterText(page);
   const p0 = await pct(page);
-  await head(page).click();
+  await head(page).dblclick();
   await page.keyboard.press("End");
   await page.keyboard.type(" and then a very long extra stretch of headline words that wraps onto many lines of the narrow column and pushes the story down the page for sure ".repeat(3));
   await expect.poll(() => meterText(page), { timeout: 10000 }).not.toBe(before);
@@ -36,7 +36,7 @@ test("edit a headline: the page refits and the fill % changes", async ({ page })
 
 test("save, reload: the edit is still there", async ({ page }) => {
   await open(page);
-  await head(page).click();
+  await head(page).dblclick();
   await page.keyboard.press("End");
   await page.keyboard.type(" REALLYSAVED");
   await expect(page.getByTestId("save-state")).toHaveText("Saved", { timeout: 10000 });
@@ -48,7 +48,7 @@ test("save, reload: the edit is still there", async ({ page }) => {
 test("a tool changes the page and survives a reload", async ({ page }) => {
   await open(page);
   await page.getByTestId("page-tab-2").click();
-  await head(page).click();
+  await head(page).dblclick();
   const w = async () => page.locator(".page .story").first().getAttribute("data-span");
   const w0 = +(await w())!;
   await page.getByTestId("tool-span-").click();
@@ -67,6 +67,7 @@ test("second user sees who holds the lock and cannot edit", async ({ browser }) 
   const pa = await a.newPage(), pb = await b.newPage();
   await open(pa, "ana");
   await expect(pa.getByTestId("lock-banner")).toHaveCount(0);
+  await head(pa).dblclick();
   await expect(pa.locator(".page [contenteditable=true]").first()).toBeVisible();
   await open(pb, "bea");
   await expect(pb.getByTestId("lock-banner")).toContainText("Ana Costa");
@@ -98,7 +99,7 @@ test("AI button only exists when the API says AI is on", async ({ page, request 
 test("API down mid-edit: typing is kept and saved when it returns", async ({ page, request }) => {
   await open(page);
   await page.route("**/v1/pages/pg_front", (r) => (r.request().method() === "PUT" ? r.abort() : r.continue()));
-  await head(page).click();
+  await head(page).dblclick();
   await page.keyboard.press("End");
   await page.keyboard.type(" TYPEDOFFLINE");
   await expect(page.getByTestId("save-state")).toContainText("Offline", { timeout: 10000 });
@@ -111,7 +112,7 @@ test("API down mid-edit: typing is kept and saved when it returns", async ({ pag
 test("versions: restore brings back earlier text", async ({ page }) => {
   await open(page);
   const original = await head(page).innerText();
-  await head(page).click();
+  await head(page).dblclick();
   await page.keyboard.press("End");
   await page.keyboard.type(" CHANGEDTEXT");
   await expect(page.getByTestId("save-state")).toHaveText("Saved", { timeout: 10000 });
@@ -124,7 +125,7 @@ test("versions: restore brings back earlier text", async ({ page }) => {
 
 test("photo: swap and set the focal point; cut-out falls back to manual crop when not built", async ({ page }) => {
   await open(page);
-  await head(page).click();
+  await head(page).dblclick();
   await page.getByTestId("tool-img").click();
   await page.getByTestId("swap-photo").click();
   await page.getByTestId("file-input").setInputFiles({ name: "p.png", mimeType: "image/png", buffer: Buffer.from("iVBORw0KGgo=", "base64") });

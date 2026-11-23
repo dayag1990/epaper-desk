@@ -45,6 +45,8 @@ export interface EditorState {
   canUndo: boolean;
   canRedo: boolean;
   dirty: string[];
+  /** How many times the page was measured and refitted (the fill meter exposes it so tests can see the refit run). */
+  refits: number;
 }
 
 type Timer = ReturnType<typeof setTimeout>;
@@ -53,7 +55,7 @@ export class EditorStore {
   state: EditorState = {
     phase: "loading", error: null, notice: null, edition: null, me: null, order: [], nos: {}, docs: {}, revs: {}, serverFit: {},
     templates: [], articles: [], assets: {}, active: null, selected: null, access: {}, meters: {},
-    save: { state: "saved" }, conflict: null, canUndo: false, canRedo: false, dirty: [],
+    save: { state: "saved" }, conflict: null, canUndo: false, canRedo: false, dirty: [], refits: 0,
   };
   private hist = new History<Docs>({});
   private saved: Record<string, string> = {};
@@ -188,13 +190,13 @@ export class EditorStore {
     this.set({ notice: msg });
   }
   /** Apply an edit. `touched` pages must be editable; read-only pages never change. */
-  commit(next: Docs, touched: string[], key?: string): boolean {
+  commit(next: Docs, touched: string[], key?: string, windowMs?: number): boolean {
     if (touched.some((p) => !this.isEditable(p))) {
       this.set({ notice: "This page is read-only right now, so that change was not made." });
       return false;
     }
     if (next === this.hist.present) return false;
-    this.hist.push(next, key);
+    this.hist.push(next, key, Date.now(), windowMs);
     this.set({ docs: next });
     this.afterChange(touched);
     return true;
@@ -221,6 +223,7 @@ export class EditorStore {
   refitted(pid: string, meter: Meter) {
     const d = this.state.docs[pid];
     if (!d) return;
+    this.state = { ...this.state, refits: this.state.refits + 1 };
     const wasClean = saveSig(d) === this.saved[pid];
     let docs = this.state.docs;
     if (this.isEditable(pid) && Math.abs(d.page.body_pt - meter.pt) > 0.0005) {
@@ -231,7 +234,7 @@ export class EditorStore {
       else this.afterChange([pid]);
     }
     const prev = this.state.meters[pid];
-    if (docs === this.state.docs && prev && prev.pct === meter.pct && prev.pt === meter.pt && prev.lowRes.join() === meter.lowRes.join()) return;
+    if (docs === this.state.docs && prev && prev.pct === meter.pct && prev.pt === meter.pt && prev.lowRes.join() === meter.lowRes.join()) { this.set({}); return; }
     this.set({ docs, meters: { ...this.state.meters, [pid]: meter } });
   }
   addAsset(a: AssetRecord) {

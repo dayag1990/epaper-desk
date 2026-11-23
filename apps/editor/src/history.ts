@@ -6,9 +6,9 @@ export class History<T> {
   private lastAt = 0;
   constructor(public present: T, private windowMs = 1200, private max = 200) {}
 
-  push(next: T, key?: string, now = Date.now()): void {
+  push(next: T, key?: string, now = Date.now(), windowMs = this.windowMs): void {
     if (next === this.present) return;
-    const merge = key != null && key === this.lastKey && now - this.lastAt < this.windowMs && this.past.length > 0;
+    const merge = key != null && key === this.lastKey && now - this.lastAt < windowMs && this.past.length > 0;
     if (!merge) {
       this.past.push(this.present);
       if (this.past.length > this.max) this.past.shift();
