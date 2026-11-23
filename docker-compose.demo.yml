@@ -1,0 +1,30 @@
+# Demo helper (profile `demo`): serves fixtures/demo-site read-only at http://demo-site:8190
+# on the epaper compose network, so the API's wizard can fetch it (the host firewall blocks
+# containers from reaching host ports). No published ports. Adds one service; others untouched.
+#
+#   docker compose -p epaper -f docker-compose.yml -f docker-compose.demo.yml --profile demo up -d demo-site
+services:
+  demo-site:
+    profiles: ["demo"]
+    image: caddy:2.8.4-alpine
+    container_name: epaper-demo-site
+    restart: unless-stopped
+    user: "1001:1001"
+    command: ["caddy", "file-server", "--root", "/site", "--listen", ":8190"]
+    environment:
+      XDG_DATA_HOME: /tmp/caddy-data
+      XDG_CONFIG_HOME: /tmp/caddy-config
+    volumes:
+      - ./fixtures/demo-site:/site:ro
+    read_only: true
+    tmpfs: ["/tmp"]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE] # the caddy binary carries this file capability
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8190/rss.xml"]
+      interval: 10s
+      timeout: 4s
+      retries: 5
+    cpus: 0.25
+    mem_limit: 128m
