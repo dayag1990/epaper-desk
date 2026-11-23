@@ -1,0 +1,84 @@
+# One entry = one row (light) on the ops desk. D9: a new service later is one more entry here, no desk code.
+#   ready: a URL (its /readyz), "pg_isready" (Docker's own health check), "self", or a rule on a measured number.
+#          For a rule, the text says when the light is GREEN; when it is false the light is RED.
+#   warn:  (optional) a rule that turns a green light AMBER.
+#   todo:  (optional) plain words shown when red.
+- name: api
+  title: The API
+  container: epaper-api
+  ready: http://api:8100/readyz
+  needs: [postgres]
+  fixes: [restart, logs]
+- name: worker
+  title: The worker (renders, exports)
+  container: epaper-worker
+  ready: http://worker:3001/readyz
+  needs: [postgres, api]
+  fixes: [restart, logs, retry_jobs]
+- name: postgres
+  title: The database
+  container: epaper-postgres
+  ready: pg_isready
+  fixes: [restart, logs, restore_to_minute]
+- name: ops
+  title: This desk
+  container: epaper-ops
+  ready: self
+  fixes: [restart, logs]
+- name: proxy
+  title: The front door (web proxy)
+  container: epaper-caddy
+  ready: http://caddy:8102/healthz
+  fixes: [restart, logs]
+- name: reader
+  title: The reader site
+  ready: http://caddy:8102/healthz
+  needs: [proxy]
+  fixes: [logs]
+- name: backups
+  title: Backups (all three kinds exist)
+  ready: backup_sets_missing == 0
+  todo: 'Press "Back up now". If it fails, the backup bucket or its keys are missing: ask for them to be set.'
+  fixes: [run_now, verify_now]
+- name: last-backup-age
+  title: Last backup
+  ready: last_backup_age_min <= 15
+  warn: last_backup_age_min > 5
+  todo: 'Press "Back up now".'
+  fixes: [run_now]
+- name: last-drill
+  title: Last restore check
+  ready: drill_pass == 1 and drill_age_days <= 7
+  warn: drill_age_days > 5
+  todo: 'Press "Check backups now". A restore check older than 7 days means nobody knows the backups work.'
+  fixes: [verify_now]
+- name: disk
+  title: Disk space
+  ready: disk_free_gb >= 20 and disk_used_pct < 90
+  warn: disk_used_pct >= 80
+  todo: 'Press "Free disk space". It only removes copies that can be made again.'
+  fixes: [clear_disk]
+- name: memory
+  title: Memory
+  ready: mem_available_pct >= 7
+  warn: mem_available_pct < 15
+  todo: 'Press "Restart everything". A job may be using too much memory.'
+  fixes: [restart_all]
+- name: queue-depth
+  title: Jobs waiting
+  ready: queue_depth < 500
+  warn: queue_depth >= 100
+  todo: 'Look at the worker. If it is green, wait; if red, restart it.'
+  fixes: [pause, resume]
+- name: dead-letter
+  title: Failed jobs
+  ready: dead_letter < 10
+  warn: dead_letter > 0
+  todo: 'Press "Retry failed jobs".'
+  fixes: [retry_jobs]
+- name: certificate
+  title: Security certificate (the padlock)
+  ready: cert_days_left >= 14
+  warn: cert_days_left < 30
+  todo: 'Press "Restart front door". The proxy renews it by itself; if it stays red, the website name or DNS is wrong.'
+  fixes: [restart]
