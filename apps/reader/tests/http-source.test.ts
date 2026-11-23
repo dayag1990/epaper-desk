@@ -27,6 +27,10 @@ describe("HttpSource against the real API shapes", () => {
     vi.stubGlobal("fetch", async () => reply(200, { items: [{ id: "a", date: "2026-11-22" }, { id: "b", date: "2026-11-23" }] }));
     expect((await new HttpSource("/", "p").edition()).id).toBe("b");
   });
+  it("two editions on the same day: the most recently published one wins", async () => {
+    vi.stubGlobal("fetch", async () => reply(200, { items: [{ id: "old", date: "2026-11-23", published_at: "2026-11-23T18:51:04Z" }, { id: "new", date: "2026-11-23", published_at: "2026-11-23T19:40:00Z" }] }));
+    expect((await new HttpSource("/", "p").edition()).id).toBe("new");
+  });
   it("shows the paper's name, not its slug", async () => {
     vi.stubGlobal("fetch", async () => reply(200, { paper: { slug: "riverton-herald", name: "The Riverton Herald" }, items: [{ id: "a", date: "2026-11-23" }] }));
     expect((await new HttpSource("/", "riverton-herald").edition()).paper).toBe("The Riverton Herald");

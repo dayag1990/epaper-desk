@@ -30,7 +30,8 @@ export class HttpSource implements EditionSource {
     const body = await r.json();
     const list: any[] = Array.isArray(body) ? body : body.editions ?? body.items ?? [];
     if (!list.length) throw new FriendlyError("No edition published yet.");
-    const e = [...list].sort((a, b) => String(b.date).localeCompare(String(a.date)))[0];
+    // newest date first; on the same day the most recently published edition wins
+    const e = [...list].sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(b.published_at ?? "").localeCompare(String(a.published_at ?? "")))[0];
     return { id: e.id, paper: (!Array.isArray(body) && body.paper?.name) || this.paper, date: String(e.date).slice(0, 10), pages: e.pages ?? e.page_count ?? 0 };
   }
 
