@@ -182,3 +182,67 @@ export function domLines(): DomLine[] {
   }
   return out;
 }
+
+export interface SpaceStat {
+  /** Column width in px (canvas). */
+  col: number;
+  /** Mean word gap of the line / the natural space of the font (1 = no stretching). */
+  growth: number;
+  /** Characters on the line, spaces included. */
+  chars: number;
+  /** Unused part of the line, 0..1 of the column (ragged-right look). */
+  rag: number;
+}
+/**
+ * How the body text sits in its columns: for every line of every body paragraph except the last line of a paragraph,
+ * the word-space growth (justified text stretches spaces to fill the line), the characters per line and the rag.
+ * Self-contained (serialised into Chromium); call after domReady().
+ */
+export function domSpaceStats(): SpaceStat[] {
+  const out: SpaceStat[] = [];
+  document.querySelectorAll<HTMLElement>(".body").forEach((b) => {
+    const cs = getComputedStyle(b);
+    const probe = document.createElement("span");
+    probe.style.cssText = "position:absolute;white-space:pre;visibility:hidden";
+    probe.style.font = cs.font;
+    probe.style.fontVariationSettings = cs.fontVariationSettings;
+    probe.style.fontFeatureSettings = cs.fontFeatureSettings;
+    b.appendChild(probe);
+    probe.textContent = "அ அ";
+    const w2 = probe.getBoundingClientRect().width;
+    probe.textContent = "அஅ";
+    const space = w2 - probe.getBoundingClientRect().width;
+    b.removeChild(probe);
+    const n = parseInt(cs.columnCount, 10) || 1;
+    const col = (b.offsetWidth - (parseFloat(cs.columnGap) || 0) * (n - 1)) / n;
+    const k = b.getBoundingClientRect().width / b.offsetWidth; // transform scale
+    b.querySelectorAll("p").forEach((p) => {
+      const tn = p.firstChild as Text | null;
+      if (!tn) return;
+      const re = /\S+/g;
+      let m: RegExpExecArray | null;
+      const lines: { x0: number; x1: number; top: number; len: number }[][] = [];
+      while ((m = re.exec(tn.data))) {
+        const r = document.createRange();
+        r.setStart(tn, m.index);
+        r.setEnd(tn, m.index + m[0].length);
+        const c = r.getClientRects()[0]!;
+        const w = { x0: c.left / k, x1: c.right / k, top: Math.round(c.top / k), len: m[0].length };
+        const l = lines[lines.length - 1];
+        if (l && Math.abs(l[0]!.top - w.top) < 4 && w.x0 >= l[l.length - 1]!.x0) l.push(w);
+        else lines.push([w]);
+      }
+      lines.forEach((l, i) => {
+        if (i === lines.length - 1 || l.length < 2) return;
+        const gaps = l.slice(1).map((w, j) => w.x0 - l[j]!.x1);
+        out.push({
+          col: Math.round(col),
+          growth: gaps.reduce((a, g) => a + g, 0) / gaps.length / space,
+          chars: l.reduce((a, w) => a + w.len, 0) + l.length - 1,
+          rag: (col - (l[l.length - 1]!.x1 - l[0]!.x0)) / col,
+        });
+      });
+    });
+  });
+  return out;
+}

@@ -1,6 +1,6 @@
 import { chromium, type Browser, type Page } from "playwright";
 import { LayoutSnapshotSchema, type Article, type LayoutSnapshot, type PageDoc } from "@epaper/core";
-import { domFill, domFrames, domLines, domReady, type DomLine, type RawFrame } from "./dom.js";
+import { domFill, domFrames, domLines, domReady, domSpaceStats, type DomLine, type RawFrame, type SpaceStat } from "./dom.js";
 import { fitBodySizeAsync, lowResCheck, type FitResult } from "./fit.js";
 import { renderDocument, renderPage, type RenderOptions } from "./render.js";
 import { SERVER_FONT_BASE, installFonts } from "./fonts.js";
@@ -66,6 +66,12 @@ export class LayoutEngine {
   async lines(zoom = 1): Promise<DomLine[]> {
     await this.page.evaluate((z) => document.querySelector<HTMLElement>(".page")!.style.setProperty("--z", String(z)), zoom);
     return this.page.evaluate(domLines);
+  }
+
+  /** Word-space growth, characters per line and rag of the body text of the page loaded last (see domSpaceStats). */
+  async spaceStats(extraCss = ""): Promise<SpaceStat[]> {
+    if (extraCss) await this.page.addStyleTag({ content: extraCss });
+    return this.page.evaluate(domSpaceStats);
   }
 
   private async fillAt(doc: PageDoc, t: Template, px?: number): Promise<number> {
