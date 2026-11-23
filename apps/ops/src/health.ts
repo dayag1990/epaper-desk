@@ -56,6 +56,12 @@ export const realProbe: ReadyProbe = async (url) => {
   }
 };
 
+const PLAIN: Record<string, (n: number) => string> = {
+  disk_used_pct: (n) => `${n}% used`, disk_free_gb: (n) => `${n} GB free`, mem_available_pct: (n) => `${n}% free`,
+  queue_depth: (n) => `${n} waiting`, dead_letter: (n) => `${n} failed`, last_backup_age_min: (n) => `${n} min since the last one`,
+  drill_age_days: (n) => `checked ${n} days ago`, cert_days_left: (n) => `${n} days left`, backup_sets_missing: (n) => (n ? `${n} kind(s) missing` : "all there"),
+  drill_pass: (n) => (n ? "passed" : "FAILED"),
+};
 const API_METRICS = new Set(["queue_depth", "dead_letter"]);
 const DEFAULT_TODO = "Press the big button to restart it. If it stays red, look at the log.";
 
@@ -167,7 +173,7 @@ export class Health {
         try {
           const okNow = evalExpr(def.ready, m);
           const warn = def.warn ? evalExpr(def.warn, m) : false;
-          const used = Object.keys(m).filter((k) => new RegExp(`\\b${k}\\b`).test(def.ready + " " + (def.warn ?? ""))).map((k) => `${k.replace(/_/g, " ")} ${m[k]}`).join(", ");
+          const used = Object.keys(m).filter((k) => PLAIN[k] && new RegExp(`\\b${k}\\b`).test(def.ready + " " + (def.warn ?? ""))).map((k) => PLAIN[k]!(m[k]!)).join(", ");
           value = used;
           if (!okNow) red(`${title} is out of range (${used}).`);
           else if (warn) amber(`${title} is getting close to a limit (${used}).`, def.todo);

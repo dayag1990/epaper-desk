@@ -1,0 +1,108 @@
+# E-Paper Desk: ops desk add-on for the `epaper` compose project.
+#
+# MERGE IT (never run it alone):
+#   docker compose -p epaper -f docker-compose.yml -f docker-compose.ops.yml up -d
+# or use ops/compose.sh, which does exactly that and also reads the `current` release pointer.
+#
+# What it adds / changes:
+#   dockerproxy  tecnativa/docker-socket-proxy, pinned. The ONLY thing that touches /var/run/docker.sock (read-only mount).
+#                It sits on an INTERNAL network that only the ops desk joins. No published port. The raw socket is never
+#                mounted into the ops container and never reaches any other network.
+#                Allowed: GET + POST + DELETE (compose needs DELETE to replace a container), containers, images, build,
+#                networks, volumes, restart/stop. Refused: SWARM, SECRETS, PLUGINS, SYSTEM, AUTH, CONFIGS, SERVICES, TASKS, NODES.
+#                HONEST LIMIT: the proxy filters by URL, not by project or body. With POST on, whoever controls the desk can
+#                still create containers (that is how `compose up` works). That is why the desk sits behind login + TOTP,
+#                the proxy is on an internal network only the desk joins, and the desk itself refuses any container outside
+#                the `epaper` project. The desk never calls volume or system prune.
+#   ops          the real desk (replaces the placeholder), on 127.0.0.1:8101 only, behind Caddy `ops.` + login + TOTP.
+#                Own state: /srv/epaper/files/_ops (plain JSON files). Needs no API, worker or Postgres.
+#
+# Releases: images are tagged by release (YYYY-MM-DD.N). `current` pointer file: /srv/epaper/files/_ops/current.
+# Rollback = repoint + `up -d` (done by the desk or ops/compose.sh). With no pointer the tag is `dev`.
+
+
+services:
+  dockerproxy:
+    image: tecnativa/docker-socket-proxy:0.3.0
+    container_name: epaper-dockerproxy
+    restart: unless-stopped
+    environment:
+      LOG_LEVEL: warning
+      CONTAINERS: "1"
+      IMAGES: "1"
+      BUILD: "1"
+      NETWORKS: "1"
+      VOLUMES: "1"
+      INFO: "1"
+      VERSION: "1"
+      POST: "1"
+      DELETE: "1"
+      ALLOW_RESTARTS: "1"
+      ALLOW_START: "1"
+      ALLOW_STOP: "1"
+      EXEC: "0"
+      SWARM: "0"
+      SERVICES: "0"
+      TASKS: "0"
+      NODES: "0"
+      SECRETS: "0"
+      CONFIGS: "0"
+      PLUGINS: "0"
+      SYSTEM: "0"
+      AUTH: "0"
+      SESSION: "0"
+      DISTRIBUTION: "0"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks: [opsdocker]
+    security_opt: ["no-new-privileges:true"]
+    cpus: 0.25
+    mem_limit: 128m
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:2375/_ping || exit 1"]
+      interval: 10s
+      timeout: 4s
+      retries: 5
+
+  ops:
+    build: { context: ., dockerfile: apps/ops/Dockerfile }
+    image: epaper/ops:${EPAPER_RELEASE:-dev}
+    depends_on: { dockerproxy: { condition: service_healthy } }
+    environment:
+      DOCKER_HOST: http://dockerproxy:2375
+      OPS_PORT: "8101"
+      OPS_PROC_DIR: /host/proc
+      OPS_SCRIPTS_DIR: /srv/epaper/desk/scripts
+      OPS_CONFIG_DIR: /srv/epaper/desk/ops
+      OPS_STATUS_MD: /srv/epaper/desk/STATUS.md
+      OPS_COMPOSE_FILES: /srv/epaper/desk/docker-compose.yml:/srv/epaper/desk/docker-compose.ops.yml
+      FILES_ROOT: /srv/epaper/files
+      OPS_API_BASE: http://api:8100
+      TZ: Asia/Kolkata
+    # published ONLY on loopback; Caddy `ops.` reaches it over the compose network
+    ports: !override ["127.0.0.1:8101:8101"]
+    networks: [default, opsdocker]
+    volumes:
+      - /proc:/host/proc:ro                                   # disk and memory, read-only
+      - /srv/epaper/desk:/srv/epaper/desk:ro                  # compose files, ops/*.yml, STATUS.md, scripts/ (backup-now.sh, restore.sh)
+      - /srv/epaper/.env:/srv/epaper/.env:ro                  # so `compose up` reads the same settings
+      - /srv/epaper/files:/srv/epaper/files                   # its own state (_ops/), alerts.log, and safe-to-clear copies
+    # A runaway render must never starve the desk: reserved share, guaranteed memory, last to be killed.
+    cpus: 0.5
+    cpu_shares: 4096
+    mem_limit: 512m
+    mem_reservation: 256m
+    memswap_limit: 512m
+    pids_limit: 256
+    oom_score_adj: -500
+    restart: unless-stopped
+
+  # releases: the same image names, tagged by release
+  api:
+    image: epaper/api:${EPAPER_RELEASE:-dev}
+  worker:
+    image: epaper/worker:${EPAPER_RELEASE:-dev}
+
+networks:
+  opsdocker:
+    internal: true

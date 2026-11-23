@@ -1,6 +1,8 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+const HERE = path.dirname(fileURLToPath(import.meta.url));
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { totpAt } from "../src/totp.js";
 import { PASSWORD, REPO_OPS, tmp } from "./helpers.js";
@@ -22,8 +24,8 @@ async function waitUp() {
 
 beforeAll(async () => {
   fs.mkdirSync(path.join(root, "files"), { recursive: true });
-  child = spawn(process.execPath, ["--import", "tsx", path.resolve(__dirname, "../src/server.ts")], {
-    cwd: path.resolve(__dirname, ".."),
+  child = spawn(process.execPath, ["--import", "tsx", path.resolve(HERE, "../src/server.ts")], {
+    cwd: path.resolve(HERE, ".."),
     env: {
       PATH: process.env.PATH!, OPS_PORT: String(PORT), OPS_BIND: "127.0.0.1", FILES_ROOT: path.join(root, "files"), OPS_PROC_DIR: "/proc",
       OPS_SERVICES_FILE: path.join(REPO_OPS, "services.yml"), OPS_ALERTS_FILE: path.join(REPO_OPS, "alerts.yml"), OPS_INSECURE_COOKIE: "1", OPS_SETUP_CODE: "setup-xyz",

@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+const HERE = path.dirname(fileURLToPath(import.meta.url));
 import { buildApp } from "../src/app.js";
 import { loadConfig, type Config } from "../src/config.js";
 import { FakeApi, FakeBackup, FakeDocker } from "../src/fakes.js";
@@ -8,7 +10,7 @@ import type { ReadyProbe } from "../src/health.js";
 import { totpAt } from "../src/totp.js";
 import type { AlertChannel } from "../src/alerts.js";
 
-export const REPO_OPS = path.resolve(__dirname, "../../../ops");
+export const REPO_OPS = path.resolve(HERE, "../../../ops");
 export const PASSWORD = "correct horse battery staple";
 
 export function tmp(prefix = "ops-test-"): string { return fs.mkdtempSync(path.join(os.tmpdir(), prefix)); }
