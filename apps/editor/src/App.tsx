@@ -3,6 +3,7 @@ import type { Article } from "@epaper/core";
 import type { Api } from "./api";
 import { plainError } from "./errors";
 import { PageView } from "./PageView";
+import { PaperSwitcher, goToEditionList, switchError } from "./PaperBits";
 import { PAGE_SIZES, addStory, applyTool, ensureSlot, moveTo, resizeItem, placeArticle, setCutout, setFocal, setPageSize, setPhoto, setRatio, setStatus, EMPTY_ASSET, type ToolAction } from "./tools";
 import type { EditorStore } from "./store";
 import type { EditorConfig } from "./config";
@@ -23,6 +24,10 @@ export function App({ store, api, cfg }: { store: EditorStore; api: Api; cfg: Ed
   const scroller = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const pickFor = useRef<string | null>(null);
+  // leaving this edition (another paper, or the edition list) asks first when there is unsaved work
+  const [leave, setLeave] = useState<null | { to: string | null; busy: boolean }>(null);
+  const [swErr, setSwErr] = useState<string | null>(null);
+  const leaving = useRef(false); // the person already chose: no browser "leave this page?" box on top
 
   /**
    * Zoom keeps one point of the page still on screen: the middle of the selected block (so it never scrolls out of view),
@@ -93,13 +98,36 @@ export function App({ store, api, cfg }: { store: EditorStore; api: Api; cfg: Ed
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") { e.preventDefault(); store.redo(); }
     };
     const online = () => store.online();
-    const beforeUnload = (e: BeforeUnloadEvent) => { if (store.state.dirty.length && store.state.save.state !== "saved") { void store.saveNow(); e.preventDefault(); } };
+    const beforeUnload = (e: BeforeUnloadEvent) => { if (!leaving.current && store.state.dirty.length && store.state.save.state !== "saved") { void store.saveNow(); e.preventDefault(); } };
     addEventListener("keydown", key); addEventListener("online", online); addEventListener("beforeunload", beforeUnload);
     return () => { removeEventListener("keydown", key); removeEventListener("online", online); removeEventListener("beforeunload", beforeUnload); };
   }, [store]);
 
+  const unsaved = () => store.state.dirty.length > 0 && store.state.save.state !== "saved";
+  /** Let go of the page lock FIRST (it belongs to the old paper), then move the session, then show the new paper's list. */
+  const leaveNow = async (to: string | null) => {
+    setSwErr(null);
+    const active = store.state.active;
+    await store.releaseLock();
+    if (to) {
+      try { await api.switchPaper(to); }
+      catch (e) { setSwErr(switchError(e)); setLeave(null); if (active) void store.setActive(active); return; }
+    }
+    leaving.current = true;
+    store.dispose();
+    goToEditionList();
+  };
+  const askLeave = (to: string | null) => { if (unsaved()) setLeave({ to, busy: false }); else void leaveNow(to); };
+  const saveAndLeave = async () => {
+    if (!leave) return;
+    setLeave({ ...leave, busy: true });
+    await store.saveNow();
+    if (unsaved() && store.state.save.state !== "saved") { setLeave({ ...leave, busy: false }); store.notify("Not everything could be saved yet. Try again, or leave without saving: your changes stay on this device."); return; }
+    const to = leave.to; setLeave(null); void leaveNow(to);
+  };
+
   if (s.phase === "loading") return <div className="center" role="status">Opening the edition…</div>;
-  if (s.phase === "failed") return <div className="center err" role="alert"><p>{s.error}</p><button className="btn" onClick={() => location.reload()}>Try again</button></div>;
+  if (s.phase === "failed") return <div className="center err" role="alert"><p>{s.error}</p><button className="btn" onClick={() => location.reload()}>Try again</button> <a className="btn" href={location.pathname}>Pick an edition</a></div>;
   if (!pid || !doc || !template) return <div className="center">This edition has no pages yet.</div>;
 
   const edit = (docs: ReturnType<typeof ensureSlot>, touched: string[], key?: string) => store.commit(docs, touched, key);
@@ -155,6 +183,8 @@ export function App({ store, api, cfg }: { store: EditorStore; api: Api; cfg: Ed
     <div className="app">
       <header className="top">
         <div className="title" title={s.edition?.name}>{s.edition?.name}</div>
+        <button className="btn" data-testid="editions-btn" onClick={() => askLeave(null)}>Editions</button>
+        <PaperSwitcher me={s.me} onPick={(slug) => askLeave(slug)} error={swErr} />
         <nav className="tabs" aria-label="Pages">
           {s.order.map((p) => {
             const mm = s.meters[p];
@@ -276,6 +306,19 @@ export function App({ store, api, cfg }: { store: EditorStore; api: Api; cfg: Ed
             <div className="row">
               <button className="btn y" onClick={() => void store.resolveConflict("mine")}>Keep mine</button>
               <button className="btn" onClick={() => void store.resolveConflict("theirs")}>Take theirs</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {leave && (
+        <div className="modal" role="alertdialog" aria-labelledby="lv-t" data-testid="leave-warning">
+          <div className="card">
+            <h3 id="lv-t">You have changes that are not saved yet</h3>
+            <p>{leave.to ? "Switching paper closes this edition." : "Going to the edition list closes this edition."} Save first, or leave now: whatever is not saved stays on this device and comes back the next time you open this page.</p>
+            <div className="row">
+              <button className="btn y" disabled={leave.busy} onClick={() => void saveAndLeave()} autoFocus>{leave.busy ? "Saving…" : "Save, then go"}</button>
+              <button className="btn" disabled={leave.busy} onClick={() => { const to = leave.to; setLeave(null); void leaveNow(to); }}>Leave without saving</button>
+              <button className="btn" disabled={leave.busy} onClick={() => setLeave(null)}>Stay here</button>
             </div>
           </div>
         </div>

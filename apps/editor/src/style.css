@@ -66,3 +66,5 @@ select{padding:0 8px}
 .row{display:flex;gap:8px;margin-top:12px}
 .toast{position:fixed;left:50%;bottom:90px;transform:translateX(-50%);background:#171717;color:#fff;padding:10px 16px;border-radius:10px;max-width:92vw;z-index:50}
 @media (max-width:700px){.two{grid-template-columns:1fr}.title{display:none}.top{gap:6px}}
+.switcher{display:inline-flex;align-items:center;gap:6px;min-width:0;max-width:100%}.switcher select{min-height:36px;max-width:100%}
+.picker .center{max-width:640px;margin:0 auto;text-align:left}.picker .list li{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)}

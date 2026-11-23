@@ -20,12 +20,17 @@ export interface MockRes {
   status: number;
   json?: unknown;
 }
-interface PageRow { id: string; no: number; doc: PageDoc; rev: number; status: string; template_id: string; versions: { rev: number; at: string; user: Person; doc: PageDoc }[]; lock?: { user: Person; until: number } }
+interface PageRow { paper: string; id: string; no: number; doc: PageDoc; rev: number; status: string; template_id: string; versions: { rev: number; at: string; user: Person; doc: PageDoc }[]; lock?: { user: Person; until: number } }
 
-export const USERS: Record<string, MockUser> = {
-  ana: { id: "usr_ana", name: "Ana Costa", role: "editor" },
-  bea: { id: "usr_bea", name: "Bea Jones", role: "editor" },
-  vic: { id: "usr_vic", name: "Vic Viewer", role: "viewer" },
+export const USERS: Record<string, MockUser & { papers: string[] }> = {
+  ana: { id: "usr_ana", name: "Ana Costa", role: "editor", papers: ["riverton-herald"] },
+  bea: { id: "usr_bea", name: "Bea Jones", role: "editor", papers: ["riverton-herald"] },
+  vic: { id: "usr_vic", name: "Vic Viewer", role: "viewer", papers: ["riverton-herald"] },
+  mia: { id: "usr_mia", name: "Mia Both", role: "editor", papers: ["riverton-herald", "thenpothigai"] }, // belongs to both papers
+};
+export const PAPERS: Record<string, { name: string; lang: string; script: string }> = {
+  "riverton-herald": { name: "Riverton Herald", lang: "en", script: "Latn" },
+  thenpothigai: { name: "Thenpothigai", lang: "ta", script: "Taml" },
 };
 
 export class MockBackend {
@@ -36,16 +41,26 @@ export class MockBackend {
   lockTtlMs = 5 * 60_000;
   now = () => Date.now();
   private n = 0;
-  constructor(private seed: MockSeed, private origin = "") { this.reset(); }
+  /** Which paper each person is signed in to right now (the real API keeps this in the session). */
+  current = new Map<string, string>();
+  /** `seed` is the first paper's edition (riverton-herald); `other` is an edition of the second paper (thenpothigai). */
+  constructor(private seed: MockSeed, private origin = "", private other?: MockSeed) { this.reset(); }
+  private seeds = () => [{ paper: "riverton-herald", seed: this.seed }, ...(this.other ? [{ paper: "thenpothigai", seed: this.other }] : [])];
+  private paperOf = (u: { id: string; papers: string[] }) => this.current.get(u.id) ?? u.papers[0]!;
+  private papersFor = (u: MockUser & { papers: string[] }) => {
+    const cur = this.paperOf(u);
+    return u.papers.map((slug) => ({ slug, ...PAPERS[slug]!, role: u.role, current: slug === cur })).sort((a, b) => Number(b.current) - Number(a.current));
+  };
 
   reset() {
     this.pages.clear();
     this.assets.clear();
     this.aiEnabled = false;
     this.cutoutBuilt = false;
-    for (const p of this.seed.pages) {
+    this.current.clear();
+    for (const { paper, seed } of this.seeds()) for (const p of seed.pages) {
       const doc = structuredClone(p.doc);
-      this.pages.set(p.id, { id: p.id, no: p.no, doc, rev: doc.rev, status: doc.status, template_id: p.template_id, versions: [{ rev: doc.rev, at: new Date(this.now()).toISOString(), user: { id: "usr_system", name: "Auto-plan" }, doc: structuredClone(doc) }] });
+      this.pages.set(p.id, { paper, id: p.id, no: p.no, doc, rev: doc.rev, status: doc.status, template_id: p.template_id, versions: [{ rev: doc.rev, at: new Date(this.now()).toISOString(), user: { id: "usr_system", name: "Auto-plan" }, doc: structuredClone(doc) }] });
     }
   }
 
@@ -62,14 +77,24 @@ export class MockBackend {
     const u = USERS[r.user ?? "ana"];
     if (!u) return err(401, "unauthorized", "Not signed in");
     let m: RegExpExecArray | null;
-    if (path === "/v1/me" && r.method === "GET") return { status: 200, json: { user: { id: u.id, name: u.name }, role: u.role, ai_enabled: this.aiEnabled } };
+    const here = this.paperOf(u);
+    if (path === "/v1/me" && r.method === "GET") return { status: 200, json: { user: { id: u.id, name: u.name }, role: u.role, ai_enabled: this.aiEnabled, papers: this.papersFor(u) } };
+    if (path === "/v1/me/papers" && r.method === "GET") return { status: 200, json: { items: this.papersFor(u) } };
+    if (path === "/v1/auth/switch" && r.method === "POST") {
+      const to = String(r.body?.paper ?? "");
+      if (!u.papers.includes(to)) return err(403, "no_access", "You do not have access to that paper.");
+      this.current.set(u.id, to);
+      return { status: 200, json: { user: { id: u.id, name: u.name }, role: u.role, ai_enabled: this.aiEnabled, papers: this.papersFor(u) } };
+    }
+    if (path === "/v1/editions" && r.method === "GET") return { status: 200, json: { items: this.seeds().filter((x) => x.paper === here).map((x) => ({ id: x.seed.edition.id, name: x.seed.edition.name, date: x.seed.edition.date, status: "open", rev: 1 })) } };
     if ((m = /^\/v1\/editions\/([^/]+)$/.exec(path)) && r.method === "GET") {
-      if (m[1] !== this.seed.edition.id) return err(404, "not_found", "No such edition");
-      return { status: 200, json: { ...this.seed.edition, status: "open", pages: [...this.pages.values()].map((p) => this.pageOut(p)), templates: this.seed.templates, articles: this.seed.articles } };
+      const found = this.seeds().find((x) => x.paper === here && x.seed.edition.id === m![1]);
+      if (!found) return err(404, "not_found", "No such edition");
+      return { status: 200, json: { ...found.seed.edition, status: "open", pages: [...this.pages.values()].filter((p) => p.paper === here).map((p) => this.pageOut(p)), templates: found.seed.templates, articles: found.seed.articles } };
     }
     if ((m = /^\/v1\/pages\/([^/]+)(?:\/(\w+))?$/.exec(path))) {
       const p = this.pages.get(m[1]!);
-      if (!p) return err(404, "not_found", "No such page");
+      if (!p || p.paper !== here) return err(404, "not_found", "No such page");
       return this.pageRoute(p, m[2], r, u);
     }
     if (path === "/v1/assets" && r.method === "POST") {

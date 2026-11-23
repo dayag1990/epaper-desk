@@ -1,6 +1,7 @@
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { Api } from "./api";
+import { EditionPicker } from "./PaperBits";
 import { loadConfig } from "./config";
 import { IdbDrafts } from "./draft";
 import { EditorStore } from "./store";
@@ -11,7 +12,7 @@ const api = new Api({ base: cfg.apiBase, mockUser: cfg.mockUser });
 const store = new EditorStore(api, new IdbDrafts(), cfg);
 const root = createRoot(document.getElementById("root")!);
 if (!cfg.edition) {
-  root.render(<div className="center">Open an edition from the desk. This link needs <code>?edition=…</code> at the end.</div>);
+  root.render(<EditionPicker api={api} />);
 } else {
   void store.load(cfg.edition, new URLSearchParams(location.search).get("page"));
   root.render(<App store={store} api={api} cfg={cfg} />);

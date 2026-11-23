@@ -1,6 +1,6 @@
 import type { PageDoc } from "@epaper/core";
 import { ApiError } from "./errors";
-import type { AssetRecord, EditionRecord, FitReportLite, LockInfo, Me, VersionRecord } from "./types";
+import type { AssetRecord, EditionListItem, EditionRecord, FitReportLite, LockInfo, Me, VersionRecord } from "./types";
 
 /**
  * Client for the /v1 routes the editor uses. Route list = docs/build-spec.json `api`, exactly:
@@ -9,6 +9,7 @@ import type { AssetRecord, EditionRecord, FitReportLite, LockInfo, Me, VersionRe
  *   POST /v1/assets                  POST /v1/assets/:id/cutout           POST /v1/ai/suggest
  * Routes the spec does NOT list but the editor needs (flagged for the API author):
  *   GET  /v1/me                      -> who am I, my role, is AI on
+ *   POST /v1/auth/switch {paper}     -> move the session to another paper of mine; GET /v1/editions -> the current paper's editions
  *   POST /v1/pages/:id/lock          -> take / refresh the page lock (heartbeat); 423 when someone else has it
  *   DELETE /v1/pages/:id/lock        -> let go of the lock
  */
@@ -58,6 +59,9 @@ export class Api {
   }
 
   me = () => this.req<Me>("GET", "/v1/me");
+  /** Move this session to another paper the person belongs to (the server answers 403 in plain words otherwise). */
+  switchPaper = (paper: string) => this.req<Me>("POST", "/v1/auth/switch", { paper });
+  editions = async () => (await this.req<{ items: EditionListItem[] }>("GET", "/v1/editions")).items;
   edition = (id: string) => this.req<EditionRecord>("GET", `/v1/editions/${enc(id)}`);
   savePage = (id: string, doc: PageDoc, rev: number) =>
     this.req<{ rev: number; doc?: PageDoc; fit_pct?: number }>("PUT", `/v1/pages/${enc(id)}`, { doc, rev });
