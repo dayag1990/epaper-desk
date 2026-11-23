@@ -36,6 +36,9 @@ model Paper {
   sources     Source[]
   files       File[]
   audit       AuditLog[]
+  articles    Article[]
+  editions    Edition[]
+  ep_editions EpEdition[]
 
   @@map("papers")
 }
@@ -154,4 +157,259 @@ model AuditLog {
 
   @@index([paper_id, at])
   @@map("audit_log")
+}
+
+// ---- Join release (expand-only): content, pages, exports, e-paper, webhooks ----
+
+/// D1 Article. `id` is the D1 id (art_...). `data` holds the whole D1 JSON; the columns are the ones we filter on.
+model Article {
+  id           String    @id
+  paper_id     String    @db.Uuid
+  source_id    String    @db.Uuid
+  external_id  String
+  url          String
+  lang         String
+  section      String
+  priority     Int
+  headline     String
+  content_hash String
+  rev          Int
+  data         Json
+  published_at DateTime
+  created_at   DateTime  @default(now())
+  updated_at   DateTime  @default(now()) @updatedAt
+  deleted_at   DateTime?
+
+  paper Paper @relation(fields: [paper_id], references: [id])
+
+  @@unique([paper_id, source_id, external_id])
+  @@index([paper_id, published_at])
+  @@map("articles")
+}
+
+model Asset {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  paper_id     String    @db.Uuid
+  asset_id     String // D1 asset id (ast_...), stable per image address
+  article_id   String?
+  parent_id    String?   @db.Uuid
+  kind         String    @default("photo")
+  src_url      String?
+  orig_key     String?
+  w            Int?
+  h            Int?
+  focal        Json?
+  derivatives  Json?
+  caption      String?
+  credit       String?
+  hash         String?
+  status       String    @default("pending")
+  error        String?
+  created_at   DateTime  @default(now())
+  updated_at   DateTime  @default(now()) @updatedAt
+
+  @@unique([paper_id, asset_id])
+  @@index([article_id])
+  @@map("assets")
+}
+
+model Edition {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  paper_id     String   @db.Uuid
+  date         DateTime @db.Date
+  name         String   @default("")
+  template_set String   @default("broadsheet-en")
+  status       String   @default("draft")
+  rev          Int      @default(1)
+  plan         Json?
+  created_by   String?  @db.Uuid
+  created_at   DateTime @default(now())
+  updated_at   DateTime @default(now()) @updatedAt
+
+  paper Paper  @relation(fields: [paper_id], references: [id])
+  pages Page[]
+
+  @@unique([paper_id, date, name])
+  @@map("editions")
+}
+
+model Page {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  paper_id        String    @db.Uuid
+  edition_id      String    @db.Uuid
+  no              Int
+  template_id     String
+  doc             Json
+  fit_pct         Int?
+  fit_report      Json?
+  fit_rev         Int       @default(0)
+  snapshot        Json?
+  status          String    @default("draft")
+  locked_by       String?   @db.Uuid
+  lock_expires_at DateTime?
+  rev             Int       @default(1)
+  created_at      DateTime  @default(now())
+  updated_at      DateTime  @default(now()) @updatedAt
+
+  edition  Edition       @relation(fields: [edition_id], references: [id])
+  versions PageVersion[]
+
+  @@unique([edition_id, no])
+  @@index([paper_id])
+  @@map("pages")
+}
+
+model PageVersion {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  paper_id  String   @db.Uuid
+  page_id   String   @db.Uuid
+  rev       Int
+  doc       Json
+  snapshot  Json? // D4 LayoutSnapshot for this version (one page), filled by the layout job
+  fit_pct   Int?
+  source    String   @default("save")
+  user_id   String?  @db.Uuid
+  at        DateTime @default(now())
+
+  page Page @relation(fields: [page_id], references: [id])
+
+  @@unique([page_id, rev])
+  @@map("page_versions")
+}
+
+model PageArticle {
+  page_id     String @db.Uuid
+  paper_id    String @db.Uuid
+  article_id  String
+  article_rev Int
+
+  @@id([page_id, article_id])
+  @@index([article_id])
+  @@map("page_articles")
+}
+
+model Export {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  paper_id     String    @db.Uuid
+  edition_id   String    @db.Uuid
+  format       String
+  status       String    @default("queued")
+  file_key     String?
+  snapshot_key String?
+  file_name    String?
+  log          Json      @default("[]")
+  created_by   String?   @db.Uuid
+  created_at   DateTime  @default(now())
+  finished_at  DateTime?
+
+  @@index([paper_id, edition_id])
+  @@map("exports")
+}
+
+model EpEdition {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  paper_id    String    @db.Uuid
+  date        DateTime  @db.Date
+  source      String // upload | export
+  export_id   String?   @db.Uuid
+  edition_id  String?   @db.Uuid
+  pdf_key     String?
+  pdf_hash    String?
+  status      String    @default("building") // building | ready | scheduled | published | failed
+  error       String?
+  publish_at  DateTime?
+  published_at DateTime?
+  version     Int       @default(1)
+  misses      Json?
+  created_at  DateTime  @default(now())
+  updated_at  DateTime  @default(now()) @updatedAt
+
+  paper Paper    @relation(fields: [paper_id], references: [id])
+  pages EpPage[]
+
+  @@index([paper_id, date])
+  @@map("ep_editions")
+}
+
+model EpPage {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  paper_id      String   @db.Uuid
+  ep_edition_id String   @db.Uuid
+  no            Int
+  version       Int      @default(1)
+  rolled_back   Boolean  @default(false)
+  pdf_key       String?
+  img_keys      Json // {"400": key, ...}
+  img_w         Int
+  img_h         Int
+  text          String   @default("")
+  corrected     Boolean  @default(false)
+  zoned_by      String?
+  created_at    DateTime @default(now())
+
+  edition EpEdition @relation(fields: [ep_edition_id], references: [id])
+  zones   EpZone[]
+
+  @@unique([ep_edition_id, no, version])
+  @@map("ep_pages")
+}
+
+model EpZone {
+  pk         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  paper_id   String   @db.Uuid
+  ep_page_id String   @db.Uuid
+  zone_id    String
+  article_id String?
+  rects      Json
+  title      String
+  url        String?
+  confidence Float
+  source     String
+
+  page EpPage @relation(fields: [ep_page_id], references: [id])
+
+  @@index([ep_page_id])
+  @@map("ep_zones")
+}
+
+model Event {
+  id         BigInt   @id @default(autoincrement())
+  paper_id   String   @db.Uuid
+  type       String
+  ep_page_id String?  @db.Uuid
+  zone_id    String?
+  at         DateTime @default(now())
+
+  @@index([paper_id, at])
+  @@map("events")
+}
+
+model Webhook {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  paper_id   String    @db.Uuid
+  url        String
+  secret     String
+  events     Json      @default("[\"edition.published\"]")
+  active     Boolean   @default(true)
+  created_at DateTime  @default(now())
+  deleted_at DateTime?
+
+  @@index([paper_id])
+  @@map("webhooks")
+}
+
+model WebhookDelivery {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid // also the x-epaper-delivery header
+  paper_id   String    @db.Uuid
+  webhook_id String    @db.Uuid
+  event      String
+  payload    Json
+  status     String    @default("pending") // pending | delivered | failed
+  attempts   Int       @default(0)
+  last_error String?
+  at         DateTime  @default(now())
+  delivered_at DateTime?
+
+  @@index([paper_id, webhook_id])
+  @@map("webhook_deliveries")
 }

@@ -39,6 +39,15 @@ importers:
 
   apps/api:
     dependencies:
+      '@epaper/connectors':
+        specifier: workspace:*
+        version: link:../../packages/connectors
+      '@epaper/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@epaper/layout':
+        specifier: workspace:*
+        version: link:../../packages/layout
       '@fastify/cookie':
         specifier: 11.0.1
         version: 11.0.1
@@ -124,6 +133,21 @@ importers:
 
   apps/worker:
     dependencies:
+      '@epaper/connectors':
+        specifier: workspace:*
+        version: link:../../packages/connectors
+      '@epaper/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@epaper/epaper':
+        specifier: workspace:*
+        version: link:../../packages/epaper
+      '@epaper/export':
+        specifier: workspace:*
+        version: link:../../packages/export
+      '@epaper/layout':
+        specifier: workspace:*
+        version: link:../../packages/layout
       pg:
         specifier: 8.13.1
         version: 8.13.1
