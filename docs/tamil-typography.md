@@ -13,7 +13,7 @@ text by an AI model: a native reader must review the language before it is shown
 - The **server** (fit, snapshot, screen PDF, so the e-paper) reads the same files through the same @font-face CSS. Playwright's `page.route` answers a
   virtual origin (`http://fonts.epaper.invalid/fonts/...`) from `templates/fonts` (`packages/layout/src/fonts.ts`, `installFonts`), which works with `setContent`.
   Chromium embeds the glyphs it uses in the PDF (`pdffonts`: "NotoSerifTamil", "AnekTamil_800wght", all `emb yes`; Skia writes variable-font instances as Type 3 fonts with a ToUnicode map, so text stays searchable).
-- `paperCss(template, {fontBase})` and `renderPage(..., {fontBase})` take the font base: editor `"" + "/fonts"` (API origin), server `SERVER_FONT_BASE`. Apart from that prefix the two stylesheets are byte-identical (tested).
+- `paperCss(template, {fontBase})` and `renderPage(..., {fontBase})` take the font base: editor `<api base>/fonts` (the API origin), server `SERVER_FONT_BASE`. Apart from that prefix the two stylesheets are byte-identical (tested).
 - Both families: `font-weight:100 900; font-stretch:75% 125%; font-display:block`. (The files' real ranges are a little narrower: Noto Serif Tamil wdth 62.5-100, Anek Tamil wght 100-800; the browser clamps.)
   `block` means text is never set in a fallback font. Axes are explicit: body `wght 400, wdth 100`, headlines `wght 800, wdth 100`, bold bits `wght 700`, in `font-weight`
   and in `font-variation-settings`. Features: `"ccmp" 1,"locl" 1,"kern" 1,"liga" 1`, `font-kerning:normal`, `text-rendering:geometricPrecision`, `font-synthesis:none`, `letter-spacing:0` (tracking breaks Tamil ligatures). `lang="ta"` on `.page`.
@@ -41,7 +41,7 @@ Column measure: Tamil sets `body.span_per_col: 2` (a story of N grid columns get
 
 ## Sizes
 
-Page: broadsheet 381 x 578 mm, canvas 1520 px (1 px = 0.25 mm), 8 columns (160 px, gap 24 px), body column gap 22 px. Body 14 px start (10.5-20 px in 0.25 px steps; Latin template: 13 px start), line height 1.55 (Latin 1.62 is looser per em but Tamil glyphs are taller, so the Tamil line is about 7 % taller in absolute terms at the same size); headlines Anek Tamil 800, line height 1.25, `17 px + 4 px x span` up to 42 px;
+Page: broadsheet 381 x 578 mm, canvas 1520 px (1 px = 0.25 mm), 8 columns (160 px, gap 24 px), body column gap 22 px. Body starts at 14.5 px and steps down to 10.5 px (up to 20 px when growing; 0.25 px steps; the Latin template starts at 13 px), line height 1.55 (Tamil marks above and below the line need room); headlines Anek Tamil 800, line height 1.25, `17 px + 4 px x span` up to 42 px;
 sub-head 18 px / 1.45; masthead 96 px. The planned pages settle at 11.25-13.75 px body (about 8-9.8 pt on paper). The fixture packs about 1,000 Tamil words on each page (one 400-word lead and four of about 160), which is dense; fewer words per page gives bigger text.
 
 ## Line breaks are the same in every context (proved)
