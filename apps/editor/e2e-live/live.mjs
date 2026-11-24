@@ -93,6 +93,15 @@ for (const no of PAGES) {
     await page.waitForTimeout(3000);
   }
 }
+// 3. Delete page: the button asks first, and "Keep the page" changes nothing (never deletes on the live stack)
+{
+  const n0 = await page.locator('[data-testid^="page-tab-"]').count();
+  await page.getByTestId("delete-page").click(); await page.waitForTimeout(300);
+  const asked = await page.getByTestId("delete-page-confirm").innerText().catch(() => "");
+  ok("Delete page asks first, in words", /Delete page \d+\?/.test(asked) && /copy of the page is kept/.test(asked), asked.split("\n")[0]);
+  await page.getByRole("button", { name: "Keep the page" }).click(); await page.waitForTimeout(300);
+  ok("Keep the page closes the question and every page is still there", (await page.getByTestId("delete-page-confirm").count()) === 0 && (await page.locator('[data-testid^="page-tab-"]').count()) === n0, `${n0} pages`);
+}
 await page.screenshot({ path: process.env.SHOT ?? "/tmp/live-editor.png" });
 await browser.close();
 console.log(out.every((x) => x.pass) ? "ALL PASS" : "SOME FAILED");
