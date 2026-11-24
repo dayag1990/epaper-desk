@@ -1,0 +1,65 @@
+{
+  "checked_at": "2026-11-24T00:02:58.031Z",
+  "results": [
+    {
+      "id": "ph-064",
+      "licence": "CC0",
+      "source_url": "https://commons.wikimedia.org/wiki/File:Chess_game_Staunton_No._6.jpg",
+      "match": true
+    },
+    {
+      "id": "ph-021",
+      "licence": "CC BY-SA 3.0",
+      "source_url": "https://commons.wikimedia.org/wiki/File:Grand_Anicut_kallanai.JPG",
+      "match": true
+    },
+    {
+      "id": "ph-095",
+      "licence": "CC BY 3.0",
+      "source_url": "https://commons.wikimedia.org/wiki/File:London_Thames_Sunset_panorama_-_Feb_2008.jpg",
+      "match": true
+    },
+    {
+      "id": "ph-008",
+      "licence": "CC BY-SA 4.0",
+      "source_url": "https://commons.wikimedia.org/wiki/File:Gangaikonda_Cholapuram_Temple_with_rising_sun.jpg",
+      "match": true
+    },
+    {
+      "id": "ph-042",
+      "licence": "CC BY-SA 4.0",
+      "source_url": "https://commons.wikimedia.org/wiki/File:Tidal_Park_Chennai_IMG_20180208_160340_HDR.jpg",
+      "match": true
+    },
+    {
+      "id": "ph-053",
+      "licence": "CC BY-SA 4.0",
+      "source_url": "https://commons.wikimedia.org/wiki/File:August_27th_Stadium_Football_Pitch,_Damaturu,_Yobe_State.jpg",
+      "match": true
+    },
+    {
+      "id": "ph-024",
+      "licence": "CC BY-SA 4.0",
+      "source_url": "https://commons.wikimedia.org/wiki/File:Chennai_Central_Railway_Station_05.jpg",
+      "match": true
+    },
+    {
+      "id": "ph-061",
+      "licence": "CC BY 4.0",
+      "source_url": "https://commons.wikimedia.org/wiki/File:Hornet_Stadium_(Sacramento).jpg",
+      "match": true
+    },
+    {
+      "id": "ph-043",
+      "licence": "CC BY-SA 4.0",
+      "source_url": "https://commons.wikimedia.org/wiki/File:India_Land_Tech_Park,Ambattur.JPG",
+      "match": true
+    },
+    {
+      "id": "ph-019",
+      "licence": "CC BY-SA 4.0",
+      "source_url": "https://commons.wikimedia.org/wiki/File:Valparai_At_its_peak.jpg",
+      "match": true
+    }
+  ]
+}
