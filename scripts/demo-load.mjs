@@ -3,6 +3,8 @@
 // wizard -> source -> sync (15 articles) -> edition -> auto-plan (4 pages) -> screen PDF -> e-paper -> publish.
 // Safe to re-run: the source, the edition and the e-paper edition are reused when they already exist.
 // Usage: node scripts/demo-load.mjs [--site http://demo-site:8190] [--paper riverton-herald] [--api http://127.0.0.1:8100]
+//   Beat 8 (their Punjabi ContentXML, same engine):
+//   node scripts/demo-load.mjs --paper punjabi-demo --cxml fixtures/blinkcms-poc.cxml --template prototype-pa --pages 2 --min 5 --name "ContentXML sample" --image-base http://demo-site:8190/img/pa/
 // The owner password is read from SEED_OWNER_PASSWORD in /srv/epaper/.env (or the environment). It is never printed.
 import { readFileSync } from "node:fs";
 
@@ -15,6 +17,8 @@ const TEMPLATE = arg("--template", "broadsheet-en");
 const PAGES = Number(arg("--pages", "4")); // 0 = one page per section (the template's section order)
 const MIN = Number(arg("--min", "15"));
 const SRCNAME = arg("--name", "Riverton Herald (demo site)");
+const CXML = arg("--cxml", null); // a Typefi ContentXML file: its text goes into the source (no site, no wizard)
+const IMGBASE = arg("--image-base", null); // where the ContentXML picture refs (100.jpg ...) can be fetched from, as the api container sees it
 const FEED = process.argv.includes("--feed"); // ingest the site's RSS feed itself (reachable inside the compose network)
 const DATE = arg("--date", new Date().toISOString().slice(0, 10));
 let password = process.env.SEED_OWNER_PASSWORD;
@@ -43,15 +47,19 @@ let r = await call("POST", "/v1/auth/login", { email: EMAIL, password, paper: SL
 if (r.status !== 200) fail("login", r);
 step(1, `signed in to ${SLUG}`);
 
-r = await call("POST", "/v1/sources/wizard", { url: SITE });
-if (r.status !== 200) fail("the mapping wizard could not read the demo site", r);
-const wiz = r.json;
-step(2, `wizard proposed a "${wiz.kind}" source (confidence ${wiz.confidence ?? "n/a"})`);
+let wiz = null;
+if (CXML) step(2, `reading the ContentXML file ${CXML}`);
+else {
+  r = await call("POST", "/v1/sources/wizard", { url: SITE });
+  if (r.status !== 200) fail("the mapping wizard could not read the demo site", r);
+  wiz = r.json;
+  step(2, `wizard proposed a "${wiz.kind}" source (confidence ${wiz.confidence ?? "n/a"})`);
+}
 
 const existing = (await call("GET", "/v1/sources")).json.items ?? [];
 let src = existing.find((s) => s.name === SRCNAME);
 if (!src) {
-  r = await call("POST", "/v1/sources", FEED ? { kind: "rss", name: SRCNAME, config: { url: SITE.replace(/\/$/, "") + "/rss.xml" } } : { kind: wiz.kind, name: SRCNAME, config: wiz.kind === "scrape" ? { ...wiz.config, max_links: 100 } : wiz.config, mapping: wiz.mapping });
+  r = await call("POST", "/v1/sources", CXML ? { kind: "cxml", name: SRCNAME, config: { xml: readFileSync(CXML, "utf8"), ...(IMGBASE ? { image_base: IMGBASE } : {}) } } : FEED ? { kind: "rss", name: SRCNAME, config: { url: SITE.replace(/\/$/, "") + "/rss.xml" } } : { kind: wiz.kind, name: SRCNAME, config: wiz.kind === "scrape" ? { ...wiz.config, max_links: 100 } : wiz.config, mapping: wiz.mapping });
   if (r.status >= 300) fail("could not save the source", r);
   src = r.json;
 }

@@ -52,6 +52,14 @@ describe("balanced auto-plan: every page between 85 and 100 %", () => {
     expectBand("punjabi", r);
     expect(ids(r)).toEqual(arts.map((a) => a.id).sort());
   }, 60000);
+  it("Punjabi sample on the broadsheet-pa set: body text never below 12 px (8.5 pt), every page 85-100 %, nothing lost", async () => {
+    const arts = await punjabiArticles(browser);
+    const r = await autoPlan(engine, arts, tplSet("broadsheet-pa"), { pages: 3 });
+    expect(r.pages.length).toBe(3);
+    expectBand("punjabi-pa", r);
+    for (const p of r.pages) expect(p.fit.body_px).toBeGreaterThanOrEqual(12);
+    expect(ids(r)).toEqual(arts.map((a) => a.id).sort());
+  }, 60000);
 });
 
 describe("placement rules", () => {

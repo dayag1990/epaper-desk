@@ -44,7 +44,20 @@
   "fonts": {
     "body": "\"Noto Sans Gurmukhi\",\"Mukta Mahee\",\"Gurmukhi MN\",\"Nirmala UI\",\"Raavi\",FreeSans,sans-serif",
     "head": "\"Anek Gurmukhi\",\"Noto Sans Gurmukhi\",FreeSans,sans-serif",
-    "faces": []
+    "faces": [
+      {
+        "family": "Noto Sans Gurmukhi",
+        "src": "noto-sans-gurmukhi/NotoSansGurmukhi[wdth,wght].ttf",
+        "weight": "100 900",
+        "stretch": "62.5% 100%"
+      },
+      {
+        "family": "Anek Gurmukhi",
+        "src": "anek-gurmukhi/AnekGurmukhi[wdth,wght].ttf",
+        "weight": "100 800",
+        "stretch": "75% 125%"
+      }
+    ]
   },
   "colors": {
     "ink": "#141414",

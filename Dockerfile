@@ -10,8 +10,9 @@ FROM base AS build
 COPY . .
 RUN pnpm install --frozen-lockfile && pnpm exec prisma generate --schema prisma/schema.prisma \
  && pnpm --filter @epaper/api... --filter @epaper/worker... build
-# The Tamil web fonts must be in the image: the api serves them at /fonts, the worker renders PDFs with the same files.
-RUN test -s "templates/fonts/noto-serif-tamil/NotoSerifTamil[wdth,wght].ttf" && test -s "templates/fonts/anek-tamil/AnekTamil[wdth,wght].ttf"
+# The Tamil and Gurmukhi web fonts must be in the image: the api serves them at /fonts, the worker renders PDFs with the same files.
+RUN test -s "templates/fonts/noto-serif-tamil/NotoSerifTamil[wdth,wght].ttf" && test -s "templates/fonts/anek-tamil/AnekTamil[wdth,wght].ttf" \
+ && test -s "templates/fonts/noto-sans-gurmukhi/NotoSansGurmukhi[wdth,wght].ttf" && test -s "templates/fonts/anek-gurmukhi/AnekGurmukhi[wdth,wght].ttf"
 
 FROM base AS runtime
 ENV NODE_ENV=production FONTS_DIR=/app/templates/fonts
