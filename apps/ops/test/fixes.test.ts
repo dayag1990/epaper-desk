@@ -176,6 +176,35 @@ describe("free disk space", () => {
   });
 });
 
+describe("free disk space: old safety dumps and restored databases", () => {
+  const old = (id: string, bytes = 4000) => ({ id, path: "/srv/epaper/" + id.replace(":", "/"), bytes, age_days: 9, what: "old copy" });
+  it("shows them in the list, removes them only after CLEAR, and the program's refusals are not counted as freed", async () => {
+    const { s, cookie } = await ready();
+    s.backup.old_ = { items: [old("dump:20261110T010000Z"), old("restore:r20261110T020000Z", 9000)], kept: [{ what: "safety dump X", reason: "one of the newest 2, always kept" }], total_bytes: 13000 };
+    const plan = (await get(s, cookie, "/ops/disk/plan")).json();
+    expect(plan.items.map((i: { id?: string }) => i.id)).toEqual(["dump:20261110T010000Z", "restore:r20261110T020000Z"]);
+    expect(plan.kept[0].reason).toMatch(/newest 2/);
+    expect(s.backup.calls.some((c) => c.startsWith("discard"))).toBe(false); // listing deletes nothing
+    const page = await get(s, cookie, "/disk");
+    expect(page.body).toMatch(/These stay/);
+    expect(page.body).toMatch(/dump:20261110T010000Z|safety copy|old copy/);
+    const no = await post(s, cookie, "/ops/disk/clear", {});
+    expect(no.statusCode).toBe(400);
+    expect(s.backup.calls.some((c) => c.startsWith("discard"))).toBe(false);
+    const ok = await post(s, cookie, "/ops/disk/clear", { confirm: "CLEAR" });
+    expect(ok.statusCode).toBe(200);
+    expect(s.backup.calls).toContain("discard dump:20261110T010000Z,restore:r20261110T020000Z");
+    expect(ok.json().removed).toEqual(["/srv/epaper/dump/20261110T010000Z", "/srv/epaper/restore/r20261110T020000Z"]);
+    expect(ok.json().freed_bytes).toBeGreaterThanOrEqual(13000);
+  });
+  it("still works when the list of old copies cannot be made", async () => {
+    const { s, cookie } = await ready();
+    s.backup.oldCopies = async () => { throw new Error("backup program missing"); };
+    const r = await post(s, cookie, "/ops/disk/clear", { confirm: "CLEAR" });
+    expect(r.statusCode).toBe(200);
+  });
+});
+
 describe("failed jobs and queues", () => {
   it("retries through the API when it is healthy; twice is the same", async () => {
     const { s, cookie } = await ready();

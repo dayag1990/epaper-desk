@@ -5,6 +5,7 @@
 #   desk_db_restore "<ISO time>"      second Postgres beside the live one, as it was at that minute; prints {"id","counts"}
 #   desk_db_switch <id>               make that copy the live database (the old one stays on disk, never deleted)
 #   desk_files_restore <scope> <ISO>  bring back files that are missing (nothing is ever overwritten)
+#   desk_old_copies [plan|discard <id>...]  old safety dumps and old restored databases that may be deleted (see the rules there)
 # stdout carries ONE json object. Everything else goes to stderr, and the LAST stderr lines are plain words the owner reads.
 # The desk container has no `exec` (its Docker door refuses it), so every database client runs as a one-off container.
 
@@ -169,6 +170,8 @@ desk_db_switch() {
   local cid src; cid=$(compose ps -q postgres 2>/dev/null | head -1)
   src=$(dk inspect -f '{{range .Mounts}}{{if eq .Destination "/var/lib/postgresql/data"}}{{.Source}}{{end}}{{end}}' "$cid" 2>/dev/null || true)
   [ "$src" = "$dir" ] || { compose stop -t 60 postgres >&2 || true; back_to_old "The database did not end up on the restored copy, so the desk went back to the old one. Nothing was lost."; }
+  # remember which restored folders have been the live database: "Free disk space" never offers those
+  { printf '%s\n' "$id"; case "$old" in "$ROOT"/restores/r*/pgdata) o=${old%/pgdata}; printf '%s\n' "${o##*/}";; esac; } >> "$STATE_DIR/was-live.txt" 2>/dev/null || true
   jq -n --arg old "$old" '{ok:true, old_copy:$old}'
 }
 
@@ -227,4 +230,62 @@ desk_files_restore() {
     while IFS= read -r -d "" f; do rel=${f#/r/'"$stage"'/data/files/}; if [ ! -e "/r/files/$rel" ]; then mkdir -p "/r/files/$(dirname "$rel")"; cp -p "$f" "/r/files/$rel" && n=$((n+1)); fi; done < <(find "/r/'"$stage"'/data/files" -type f -print0 2>/dev/null)
     rm -rf "/r/'"$stage"'"; echo $n') || dfail "The files were fetched but could not be put back. Nothing was overwritten."
   jq -n --arg scope "$scope" --argjson added "${added:-0}" '{ok:true, scope:$scope, files_brought_back:$added}'
+}
+
+# ---- old copies the owner may free ----------------------------------------------------------------------
+# Rules (owner, 2026-11-24): only safety dumps and restored databases older than OLD_COPY_DAYS (7); always keep the newest 2
+# safety dumps; never delete a dump the off-box bucket does not hold yet (backup-status.json push.snapshots_ok is the time of the
+# last push that included the dumps folder); never delete a restored database that is live or ever was live (its newest data may
+# exist nowhere else). `plan` lists, `discard <id>...` deletes only what `plan` would list (ids: dump:<name>, restore:<id>).
+OLD_COPY_DAYS=${OLD_COPY_DAYS:-7}
+OLD_KEEP_DUMPS=${OLD_KEEP_DUMPS:-2}
+desk_old_copies() {
+  local mode=${1:-plan}; [ $# -gt 0 ] && shift
+  local now cutoff pushed pe i=0 mt f b ids=() items="[]" kept="[]" bytes age d id e live hist
+  now=$(date +%s); cutoff=$(( now - OLD_COPY_DAYS * 86400 ))
+  pushed=$(jq -r '.push.snapshots_ok // empty' "$ROOT/backup-status.json" 2>/dev/null || true)
+  pe=0; [ -n "$pushed" ] && pe=$(date -u -d "$pushed" +%s 2>/dev/null || echo 0)
+  addk() { kept=$(jq -c --arg w "$1" --arg r "$2" '. + [{what:$w, reason:$r}]' <<<"$kept"); }
+  addi() { items=$(jq -c --arg id "$1" --arg p "$2" --argjson b "$3" --argjson a "$4" --arg w "$5" '. + [{id:$id, path:$p, bytes:$b, age_days:$a, what:$w}]' <<<"$items"); }
+  # safety dumps, newest first
+  while read -r mt f; do
+    [ -n "$f" ] || continue; mt=${mt%.*}; b=$(basename "$f" .sql.gz); i=$((i+1))
+    age=$(( (now - mt) / 86400 )); bytes=$(stat -c %s "$f" 2>/dev/null || echo 0)
+    if [ $i -le "$OLD_KEEP_DUMPS" ]; then addk "safety dump $b" "one of the newest $OLD_KEEP_DUMPS, always kept"
+    elif [ "$mt" -gt "$cutoff" ]; then addk "safety dump $b" "younger than $OLD_COPY_DAYS days"
+    elif [ "$pe" -lt "$mt" ]; then addk "safety dump $b" "not copied to the off-box bucket yet"
+    else addi "dump:$b" "$f" "$bytes" "$age" "safety copy of the database, $age days old (also held in the off-box bucket)"; fi
+  done < <(find "$ROOT/snapshots" -maxdepth 1 -name '*.sql.gz' ! -name '.tmp.*' -printf '%T@ %p\n' 2>/dev/null | sort -rn)
+  # restored databases
+  resolve_state_dir
+  live=$(cat "$STATE_DIR/pgdata-source" 2>/dev/null || true); hist=$(cat "$STATE_DIR/was-live.txt" 2>/dev/null || true)
+  for d in "$ROOT"/restores/r*; do
+    [ -e "$d" ] || continue; id=$(basename "$d")
+    [[ "$id" =~ ^r[0-9]{8}T[0-9]{6}Z$ ]] || continue
+    e=$(date -u -d "${id:1:4}-${id:5:2}-${id:7:2} ${id:10:2}:${id:12:2}:${id:14:2}" +%s 2>/dev/null || echo "$now")
+    bytes=$(du -sb "$d" 2>/dev/null | cut -f1 || echo 0); [ -n "$bytes" ] || bytes=0
+    age=$(( (now - e) / 86400 ))
+    if [ "$live" = "$d/pgdata" ] || [ "$live" = "$d" ]; then addk "restored database $id" "it is the live database"
+    elif grep -qx "$id" <<<"$hist"; then addk "restored database $id" "it has been the live database, so it may hold data nowhere else"
+    elif [ "$e" -gt "$cutoff" ]; then addk "restored database $id" "younger than $OLD_COPY_DAYS days"
+    else addi "restore:$id" "$d" "$bytes" "$age" "restored database copy, $age days old, never used as the live one"; fi
+  done
+  if [ "$mode" = plan ]; then jq -cn --argjson i "$items" --argjson k "$kept" '{items:$i, kept:$k, total_bytes: ($i | map(.bytes) | add // 0)}'; return 0; fi
+  # discard: only ids the plan lists
+  local removed="[]" refused="[]" want ok
+  for want in "$@"; do
+    ok=$(jq -r --arg w "$want" '[.[] | select(.id == $w)] | length' <<<"$items")
+    if [ "$ok" != 1 ]; then refused=$(jq -c --arg w "$want" '. + [$w]' <<<"$refused"); continue; fi
+    case "$want" in
+      dump:*) b=${want#dump:}; [[ "$b" =~ ^[0-9]{8}T[0-9]{6}Z$ ]] || { refused=$(jq -c --arg w "$want" '. + [$w]' <<<"$refused"); continue; }
+              rm_old_copy "snapshots/$b.sql.gz snapshots/$b.reason" || { refused=$(jq -c --arg w "$want" '. + [$w]' <<<"$refused"); continue; };;
+      restore:*) id=${want#restore:}; discard_copy "$id"; [ ! -e "$ROOT/restores/$id" ] || { refused=$(jq -c --arg w "$want" '. + [$w]' <<<"$refused"); continue; };;
+    esac
+    removed=$(jq -c --arg w "$want" '. + [$w]' <<<"$removed")
+  done
+  jq -cn --argjson r "$removed" --argjson f "$refused" '{removed:$r, refused:$f}'
+}
+# rm_old_copy "<path> <path>": paths relative to $ROOT, removed by a one-off container (the desk's own view of $ROOT is read-only)
+rm_old_copy() {
+  dk_out --user 0 -v "$ROOT:/r" --entrypoint bash "$PG_IMAGE" -c 'cd /r && rm -f -- '"$1" >/dev/null 2>&1
 }

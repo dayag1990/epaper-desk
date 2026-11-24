@@ -28,6 +28,7 @@ import { publicRoutes } from "./routes/public.js";
 import { adminRoutes } from "./routes/admin-index.js";
 import { serveEditor } from "./lib/static.js";
 import { fontRoutes } from "./routes/fonts.js";
+import { opsInternalRoutes } from "./routes/ops-internal.js";
 
 export async function buildApp() {
   const app = Fastify({ logger: { level: "info", redact: ["req.headers.cookie", "req.headers.authorization", "req.headers['x-api-key']"] }, trustProxy: true, bodyLimit: 64 * 1024 * 1024 });
@@ -89,6 +90,7 @@ export async function buildApp() {
 
   await app.register(async (s) => adminRoutes(s.withTypeProvider<ZodTypeProvider>()));
   await app.register(async (s) => fontRoutes(s));
+  await app.register(async (s) => opsInternalRoutes(s.withTypeProvider<ZodTypeProvider>()));
 
   app.addHook("onReady", async () => {
     await ensureQueues(await getBoss());

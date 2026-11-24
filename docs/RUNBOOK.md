@@ -80,3 +80,22 @@ If any of the four is missing, say so before you start. Do not guess.
 ## 7. What to tell the builder
 
 Write down the time, the row that was red and the words under it. Copy them from **History** (it lists every press and the result). Do not paste passwords.
+
+## The code is in the off-box backup too (since 2026-11-24)
+Every push to the bucket also holds `/srv/epaper/desk` (the repository with its full git history; `node_modules` and `dist` are left out, they are rebuilt) and `/srv/epaper/demo-assets` (the Tamil demo photos, which git does not carry), and the safety dumps in `/srv/epaper/snapshots`.
+On a brand-new machine that has Docker and the five `BACKUP_*` values, get the code back first, then run `scripts/restore.sh`:
+
+    docker run --rm -e AWS_ACCESS_KEY_ID=<key id> -e AWS_SECRET_ACCESS_KEY=<key> -e RESTIC_PASSWORD=<backup password> \
+      -v /srv/epaper:/target restic/restic:0.17.3 -r s3:<endpoint>/<bucket>/epaper/restic restore latest --tag auto --target /target/code-restore --include /data/desk --include /data/demo-assets
+    mv /srv/epaper/code-restore/data/desk /srv/epaper/desk && mv /srv/epaper/code-restore/data/demo-assets /srv/epaper/demo-assets
+    cd /srv/epaper/desk && git status      # the working tree and history are back
+
+## "Free disk space" (what it may delete)
+Old safety dumps (`/srv/epaper/snapshots/*.sql.gz`) and restored database copies (`/srv/epaper/restores/r*`) older than 7 days, plus rebuildable folders in the files folder. Rules, all enforced by `scripts/lib/desk-ops.sh desk_old_copies` (the desk lists first; you type CLEAR to delete):
+- the 2 newest safety dumps are always kept;
+- a dump is deleted only if the last push to the bucket (`push.snapshots_ok` in `backup-status.json`) is newer than the dump, so the bucket holds it;
+- a restored database that is live, or ever was live (`/srv/epaper/files/_ops/was-live.txt`), is never deleted.
+The screen lists what stays and why.
+
+## The bucket says "daily usage cap" or "Access Denied"
+The status line says which in plain words (Backblaze's own answer is read once per 10 minutes). The cap resets at 00:00 UTC; raise it in Backblaze > Caps & Alerts. The push waits 10 minutes between tries while the bucket refuses, and normally runs every `PUSH_INTERVAL` seconds (default 600; 60 needs raised caps, because a push every minute used up the free allowance by 03:00 UTC on 2026-11-24).

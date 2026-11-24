@@ -5,6 +5,8 @@
 #   --status            JSON of what each kind of backup looks like (null = that kind does not exist)
 #   --verify            restore check into a scratch copy; records the result (JSON)
 #   --snapshot "why"    safety copy of the database before a destructive button; prints {"id":...}
+#   --old-copies        JSON list of old safety dumps / restored databases that may be freed (rules in lib/desk-ops.sh)
+#   --discard-copies id...   delete those (only ids the list above holds); prints {"removed":[],"refused":[]}
 set -uo pipefail
 . "$(dirname "$0")/lib/backup-common.sh"
 . "$(dirname "$0")/lib/desk-ops.sh"
@@ -13,6 +15,8 @@ case "${1:-}" in
   --status) desk_status; exit $?;;
   --snapshot) desk_snapshot "${2:-manual}"; exit $?;;
   --verify) desk_verify; exit $?;;
+  --old-copies) desk_old_copies plan; exit $?;;
+  --discard-copies) shift; desk_old_copies discard "$@"; exit $?;;
   "") ;;
   *) echo "Unknown option: $1" >&2; exit 64;;
 esac

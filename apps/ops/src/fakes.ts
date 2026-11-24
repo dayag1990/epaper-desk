@@ -1,6 +1,6 @@
 import type { ContainerInfo, DockerDriver } from "./docker.js";
 import { DockerError } from "./docker.js";
-import type { BackupDriver, BackupStatus } from "./backup.js";
+import type { BackupDriver, BackupStatus, OldCopies } from "./backup.js";
 import type { ApiClient, QueueStats } from "./api-client.js";
 
 /** In-memory Docker for tests and for demos without a socket. */
@@ -76,6 +76,15 @@ export class FakeBackup implements BackupDriver {
   }
   async switchDb(id: string) { this.calls.push(`switch ${id}`); const r = this.restores.get(id); if (!r) throw new Error("There is no restore with that id."); r.switched = true; }
   async restoreFiles(scope: string, at: string) { this.calls.push(`restoreFiles ${scope} ${at}`); }
+  old_: OldCopies = { items: [], kept: [], total_bytes: 0 };
+  async oldCopies() { this.calls.push("oldCopies"); return this.old_; }
+  async discardCopies(ids: string[]) {
+    this.calls.push(`discard ${ids.join(",")}`);
+    const have = new Set(this.old_.items.map((i) => i.id));
+    const removed = ids.filter((i) => have.has(i)), refused = ids.filter((i) => !have.has(i));
+    this.old_ = { ...this.old_, items: this.old_.items.filter((i) => !removed.includes(i.id)) };
+    return { removed, refused };
+  }
 }
 
 export class FakeApi implements ApiClient {

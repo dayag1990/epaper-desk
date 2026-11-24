@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, chmodSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, chmodSync, utimesSync } from "node:fs";
 import { gunzipSync } from "node:zlib";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -102,5 +102,122 @@ describe("status file shape", () => {
     const t = JSON.parse(readFileSync(status, "utf8"));
     expect(t.last_error).toBeNull();
     expect(t.healthy).toBe(true);
+  });
+});
+
+describe("push to the bucket (bk push) with a fake restic and a fake Backblaze", () => {
+  const setup = (mode: "cap" | "ok" | "key") => {
+    const d = tmp(), bin = path.join(d, "bin"); mkdirSync(bin);
+    for (const x of ["files", "walarchive", "basebackups", "snapshots", "lock"]) mkdirSync(path.join(d, x));
+    const log = path.join(d, "restic.log");
+    writeFileSync(path.join(bin, "restic"), `#!/bin/sh
+echo "$@" >> ${log}
+case "$1" in
+  cat|init) [ "${mode}" = ok ] && exit 0; echo "Fatal: unable to open config file: Stat: Access Denied." >&2; exit 1;;
+  backup) [ "${mode}" = ok ] && { echo "snapshot abcd1234 saved"; exit 0; }; echo "Fatal: Stat: Access Denied." >&2; exit 1;;
+esac
+exit 0
+`);
+    writeFileSync(path.join(bin, "curl"), `#!/bin/sh
+if [ "${mode}" = cap ]; then echo '{"code":"transaction_cap_exceeded","message":"Transaction cap exceeded","status":403}'; else echo '{"code":"bad_auth_token","status":401}'; fi
+`);
+    chmodSync(path.join(bin, "restic"), 0o755); chmodSync(path.join(bin, "curl"), 0o755);
+    const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, DATA: d, LOCKDIR: path.join(d, "lock"), RESTIC_REPOSITORY: "s3:x/y", BACKUP_S3_ENDPOINT: "https://s3.eu.backblazeb2.com", BACKUP_S3_KEY: "k", BACKUP_S3_SECRET: "s", CONFIG_COPY: path.join(d, "none") };
+    const push = () => spawnSync(bk, ["push"], { env, encoding: "utf8" });
+    const status = () => JSON.parse(readFileSync(path.join(d, "backup-status.json"), "utf8"));
+    const calls = () => (existsSync(log) ? readFileSync(log, "utf8").trim().split("\n") : []);
+    return { d, push, status, calls };
+  };
+  it("a used-up daily cap is named in plain words, and the next minute does not hammer the bucket", () => {
+    const t = setup("cap");
+    t.push();
+    expect(t.status().errors.push.msg).toMatch(/daily usage cap .*Caps & Alerts/);
+    const n = t.calls().length;
+    t.push();
+    expect(t.calls().length).toBe(n); // backing off: no new request
+    expect(existsSync(path.join(t.d, "lock", "push-backoff"))).toBe(true);
+  });
+  it("a key Backblaze no longer accepts is named as such", () => {
+    const t = setup("key");
+    t.push();
+    expect(t.status().errors.push.msg).toMatch(/does not accept the bucket key/);
+  });
+  it("a good push records when the safety dumps were copied, and skips the repository check next time", () => {
+    const t = setup("ok");
+    t.push();
+    const s = t.status();
+    expect(s.push.last_ok).toBeTruthy();
+    expect(s.push.snapshots_ok).toBeTruthy();
+    expect(s.errors.push).toBeUndefined();
+    t.push();
+    expect(t.calls().filter((c) => c.startsWith("cat"))).toHaveLength(1);
+    expect(t.calls().filter((c) => c.startsWith("backup")).every((c) => c.includes(path.join(t.d, "snapshots")))).toBe(true);
+  });
+});
+
+describe("old copies the desk may free (scripts/lib/desk-ops.sh desk_old_copies)", () => {
+  const stamp = (daysAgo: number) => new Date(Date.now() - daysAgo * 86400_000).toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
+  function setup(opts: { pushedDaysAgo: number | null; live?: string; wasLive?: string[] }) {
+    const d = tmp(), ops = path.join(d, "_ops"); mkdirSync(path.join(d, "snapshots")); mkdirSync(path.join(d, "restores")); mkdirSync(ops);
+    // dumps aged 0.5, 3, 8, 9, 20 days
+    const dumps = [0.5, 3, 8, 9, 20].map((a) => {
+      const id = stamp(a), f = path.join(d, "snapshots", `${id}.sql.gz`);
+      writeFileSync(f, "x".repeat(100)); const t = new Date(Date.now() - a * 86400_000); utimesSync(f, t, t); return { id, a };
+    });
+    const restores = [3, 10, 12].map((a) => { const id = "r" + stamp(a); mkdirSync(path.join(d, "restores", id, "pgdata"), { recursive: true }); return id; });
+    const status = { push: { snapshots_ok: opts.pushedDaysAgo === null ? null : new Date(Date.now() - opts.pushedDaysAgo * 86400_000).toISOString() } };
+    writeFileSync(path.join(d, "backup-status.json"), JSON.stringify(status));
+    if (opts.live) writeFileSync(path.join(ops, "pgdata-source"), path.join(d, "restores", opts.live, "pgdata"));
+    if (opts.wasLive) writeFileSync(path.join(ops, "was-live.txt"), opts.wasLive.join("\n") + "\n");
+    const run = (fn: string, pre = ":") => {
+      const r = spawnSync("bash", ["-c", `set -uo pipefail; . scripts/lib/backup-common.sh; . scripts/lib/desk-ops.sh; ${pre}; ${fn}`], { cwd: root, encoding: "utf8", env: { ...process.env, BACKUP_ROOT: d, OPS_STATE_DIR: ops } });
+      return { out: r.stdout.trim().split("\n").pop() ?? "", err: r.stderr, status: r.status };
+    };
+    return { d, dumps, restores, run };
+  }
+  it("offers dumps older than 7 days that the bucket holds, never the newest 2, and restored copies never live", () => {
+    const t = setup({ pushedDaysAgo: 0 });
+    const plan = JSON.parse(t.run("desk_old_copies plan").out);
+    const ids = plan.items.map((i: any) => i.id).sort();
+    // 20-day and 9-day and 8-day dumps are old, but the newest 2 (0.5 d, 3 d) are always kept anyway: all three old ones qualify
+    expect(ids).toEqual([`dump:${t.dumps[2].id}`, `dump:${t.dumps[3].id}`, `dump:${t.dumps[4].id}`, `restore:${t.restores[1]}`, `restore:${t.restores[2]}`].sort());
+    expect(plan.kept.some((k: any) => /always kept/.test(k.reason))).toBe(true);
+    expect(plan.kept.some((k: any) => k.what.includes(t.restores[0]) && /younger/.test(k.reason))).toBe(true);
+  });
+  it("keeps every dump the bucket does not hold yet", () => {
+    const never = JSON.parse(setup({ pushedDaysAgo: null }).run("desk_old_copies plan").out);
+    expect(never.items.filter((i: any) => i.id.startsWith("dump:"))).toEqual([]);
+    expect(never.kept.some((k: any) => /not copied to the off-box bucket/.test(k.reason))).toBe(true);
+    // pushed 10 days ago: a dump from 9 days ago is newer than the last push, so it stays; the 20-day one may go
+    const t = setup({ pushedDaysAgo: 10 });
+    const plan = JSON.parse(t.run("desk_old_copies plan").out);
+    expect(plan.items.filter((i: any) => i.id.startsWith("dump:")).map((i: any) => i.id)).toEqual([`dump:${t.dumps[4].id}`]);
+  });
+  it("never offers a restored database that is live or ever was live", () => {
+    const base = setup({ pushedDaysAgo: 0 });
+    const t = setup({ pushedDaysAgo: 0 });
+    const live = t.restores[1], was = t.restores[2];
+    const t2 = setup({ pushedDaysAgo: 0, live, wasLive: [was] });
+    // restores differ per setup (timestamps); read names from the second one
+    const r2 = readdirSync(path.join(t2.d, "restores")).sort();
+    const liveName = r2[1], wasName = r2[0];
+    writeFileSync(path.join(t2.d, "_ops", "pgdata-source"), path.join(t2.d, "restores", liveName, "pgdata"));
+    writeFileSync(path.join(t2.d, "_ops", "was-live.txt"), wasName + "\n");
+    const plan = JSON.parse(t2.run("desk_old_copies plan").out);
+    expect(plan.items.filter((i: any) => i.id.startsWith("restore:"))).toEqual([]);
+    expect(plan.kept.filter((k: any) => k.what.startsWith("restored database")).length).toBe(3);
+    expect(base.d).not.toBe(t.d);
+  });
+  it("discard deletes only what the plan lists and refuses everything else", () => {
+    const t = setup({ pushedDaysAgo: 0 });
+    const pre = 'rm_old_copy() { echo "RM $1" >&2; rm -f $(for x in $1; do echo "$ROOT/$x"; done); }; discard_copy() { echo "DISCARD $1" >&2; rm -rf "$ROOT/restores/$1"; }';
+    const newest = t.dumps[0].id, old = t.dumps[4].id;
+    const r = t.run(`desk_old_copies discard dump:${newest} dump:${old} dump:../../x restore:${t.restores[0]}`, pre);
+    const res = JSON.parse(r.out);
+    expect(res.removed).toEqual([`dump:${old}`]);
+    expect(res.refused.sort()).toEqual([`dump:${newest}`, "dump:../../x", `restore:${t.restores[0]}`].sort());
+    expect(existsSync(path.join(t.d, "snapshots", `${old}.sql.gz`))).toBe(false);
+    expect(existsSync(path.join(t.d, "snapshots", `${newest}.sql.gz`))).toBe(true);
+    expect(existsSync(path.join(t.d, "restores", t.restores[0]))).toBe(true);
   });
 });

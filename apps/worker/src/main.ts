@@ -1,5 +1,7 @@
 import http from "node:http";
 import { access, constants } from "node:fs/promises";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import pg from "pg";
 import PgBoss from "pg-boss";
 import { z } from "zod";
@@ -48,8 +50,14 @@ export const handlers: Record<string, (e: Envelope, job: JobCtx) => Promise<void
 /** The ai queue does nothing unless AI is switched on. */
 export const queueEnabled = (q: string, env: NodeJS.ProcessEnv = process.env) => q !== "ai" || env.AI_ENABLED === "true";
 
+/** Queues the owner paused from the ops desk (the API writes the file, see apps/api/src/routes/ops-internal.ts). */
+export function readPausedQueues(file: string): Set<string> {
+  try { const v = JSON.parse(readFileSync(file, "utf8")); return new Set(Array.isArray(v) ? v.filter((x) => typeof x === "string") : []); } catch { return new Set(); }
+}
+
 async function main() {
   const filesRoot = process.env.FILES_ROOT ?? "/files";
+  const pausedFile = path.join(filesRoot, "_ops", "paused-queues.json");
   const retry = { retryLimit: 3, retryDelay: Number(process.env.JOB_RETRY_DELAY_S ?? 2), retryBackoff: true };
   const boss = new PgBoss({ connectionString: databaseUrl(), max: 5 });
   boss.on("error", (e) => console.error("queue error:", e.message));
@@ -68,23 +76,41 @@ async function main() {
 
   // how many jobs of a queue run side by side (renders are capped at 4 in pool.ts, whatever these say)
   const WORKERS: Record<string, number> = { ingest: 1, assets: 3, ai: 1, layout: 2, export: 2, epaper: 2 };
+  const handle = async (jobs: any) => {
+    for (const job of Array.isArray(jobs) ? jobs : [jobs]) {
+      const env = Envelope.parse(job.data);
+      const h = handlers[env.type];
+      if (!h) throw new Error(`no handler for job type ${env.type}`);
+      // the last allowed try: a failure now goes to the dead letters, so handlers record it as final
+      const final = (job.retryCount ?? 0) >= (job.retryLimit ?? 0);
+      await h(env, { final });
+    }
+  };
+  const listening = new Set<string>();
+  const startListening = async (q: string) => {
+    for (let i = 0; i < (WORKERS[q] ?? 1); i++) await boss.work<unknown>(q, { batchSize: 1, pollingIntervalSeconds: 1, includeMetadata: true }, handle);
+    listening.add(q);
+  };
   for (const q of QUEUES) {
     if (!queueEnabled(q)) {
       console.log(`queue ${q}: AI is off, not listening`);
       continue;
     }
-    for (let i = 0; i < (WORKERS[q] ?? 1); i++)
-      await boss.work<unknown>(q, { batchSize: 1, pollingIntervalSeconds: 1, includeMetadata: true }, async (jobs: any) => {
-        for (const job of Array.isArray(jobs) ? jobs : [jobs]) {
-          const env = Envelope.parse(job.data);
-          const h = handlers[env.type];
-          if (!h) throw new Error(`no handler for job type ${env.type}`);
-          // the last allowed try: a failure now goes to the dead letters, so handlers record it as final
-          const final = (job.retryCount ?? 0) >= (job.retryLimit ?? 0);
-          await h(env, { final });
-        }
-      });
+    if (readPausedQueues(pausedFile).has(q)) { console.log(`queue ${q}: paused from the ops desk, not listening`); continue; }
+    await startListening(q);
   }
+  // The ops desk pauses and resumes a queue by writing a small file; look at it every 3 seconds. A job already running finishes.
+  const pausedTimer = setInterval(async () => {
+    const paused = readPausedQueues(pausedFile);
+    for (const q of QUEUES) {
+      if (!queueEnabled(q)) continue;
+      try {
+        if (paused.has(q) && listening.has(q)) { await boss.offWork(q); listening.delete(q); console.log(`queue ${q}: paused from the ops desk`); }
+        else if (!paused.has(q) && !listening.has(q)) { await startListening(q); console.log(`queue ${q}: running again`); }
+      } catch (e) { console.error(`queue ${q}: could not change pause state: ${(e as Error).message}`); }
+    }
+  }, 3000);
+  pausedTimer.unref();
 
   const pool = new pg.Pool({ connectionString: databaseUrl(), max: 1, connectionTimeoutMillis: 4000 });
   const check = async () => {

@@ -26,7 +26,8 @@ export interface FixDeps {
 const CONFIRM = { rollback: "ROLLBACK", clear: "CLEAR", restore: "RESTORE", switch: "SWITCH" } as const;
 const PROTECTED_SEGMENTS = new Set(["original", "originals", "_ops", "backup", "backups", "backup-standin"]);
 
-export interface ClearItem { path: string; bytes: number; what: string }
+export interface ClearItem { path: string; bytes: number; what: string; id?: string }
+export interface ClearPlan { items: ClearItem[]; total_bytes: number; kept: { what: string; reason: string }[] }
 
 function dirSize(p: string): number {
   let n = 0;
@@ -195,7 +196,8 @@ export class Fixes {
   }
 
   // ---- disk ----
-  planClear(): { items: ClearItem[]; total_bytes: number } {
+  /** What "Free disk space" would remove: rebuildable copies in the files folder, plus old safety dumps and old restored databases (rules in scripts/lib/desk-ops.sh). */
+  async planClear(): Promise<ClearPlan> {
     const root = this.d.cfg.filesDir, names = new Set(this.d.cfg.clearDirNames);
     const items: ClearItem[] = [];
     const walk = (dir: string, depth: number) => {
@@ -210,17 +212,31 @@ export class Fixes {
       }
     };
     walk(root, 0);
-    return { items, total_bytes: items.reduce((a, i) => a + i.bytes, 0) };
+    let kept: ClearPlan["kept"] = [];
+    try {
+      const old = await this.d.backup.oldCopies();
+      for (const o of old.items) items.push({ path: o.path, bytes: o.bytes, what: o.what, id: o.id });
+      kept = old.kept;
+    } catch { /* the list of old copies is an extra; the folders above still work without it */ }
+    return { items, total_bytes: items.reduce((a, i) => a + i.bytes, 0), kept };
   }
   async clearDisk(confirm: string | undefined): Promise<{ ok: true; message: string; freed_bytes: number; removed: string[] }> {
     return this.once("clear-disk", async () => {
-      const plan = this.planClear();
+      const plan = await this.planClear();
       this.need(confirm, CONFIRM.clear, "free disk space");
       // no snapshot: only rebuildable copies are removed, never originals or backups; a backup may be impossible when the disk is full
       let freed = 0;
       const removed: string[] = [];
       const rootReal = fs.realpathSync(this.d.cfg.filesDir);
-      for (const it of plan.items) {
+      const oldIds = plan.items.filter((i) => i.id).map((i) => i.id!);
+      if (oldIds.length) {
+        // old safety dumps and restored databases: the backup program re-checks every rule before it deletes anything
+        try {
+          const r = await this.d.backup.discardCopies(oldIds);
+          for (const id of r.removed) { const it = plan.items.find((i) => i.id === id); if (it) { freed += it.bytes; removed.push(it.path); } }
+        } catch (e) { throw new OpsError(502, `The old copies could not be removed (${(e as Error).message}). Nothing else was changed.`); }
+      }
+      for (const it of plan.items.filter((i) => !i.id)) {
         const real = fs.realpathSync(it.path);
         const rel = path.relative(rootReal, real).split(path.sep);
         if (rel[0] === ".." || rel.some((s) => PROTECTED_SEGMENTS.has(s))) continue; // belt and braces

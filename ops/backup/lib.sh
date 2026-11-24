@@ -3,6 +3,9 @@ DATA=${DATA:-/data}
 FILES_DIR=${FILES_DIR:-$DATA/files}
 WAL_DIR=${WAL_DIR:-$DATA/walarchive}
 BASE_DIR=${BASE_DIR:-$DATA/basebackups}
+CODE_DIR=${CODE_DIR:-$DATA/desk}              # the code repository (checked out here)
+ASSETS_DIR=${ASSETS_DIR:-$DATA/demo-assets}    # demo photos: not in git
+SNAP_DIR=${SNAP_DIR:-$DATA/snapshots}   # safety dumps the ops desk takes before a destructive button
 STATUS=${STATUS:-$DATA/backup-status.json}
 LOCKDIR=${LOCKDIR:-/tmp}
 KEEP_BASEBACKUPS=${KEEP_BASEBACKUPS:-3}
@@ -22,7 +25,7 @@ SKEL='{"version":1,"updated":null,"healthy":null,"lag_seconds":null,"last_error"
 "files":{"last_ok":null,"size_bytes":null},
 "wal":{"last_ok":null,"size_bytes":null,"segments":null,"last_archived":null,"archive_failures":null},
 "basebackup":{"last_ok":null,"size_bytes":null,"name":null,"kept":null},
-"push":{"last_ok":null,"last_attempt":null,"last_duration_s":null,"snapshot":null},
+"push":{"last_ok":null,"last_attempt":null,"last_duration_s":null,"snapshot":null,"snapshots_ok":null},
 "prune":{"last_ok":null}}'
 
 # st_set '<jq filter>' [jq args...]  - atomic read-modify-write; refreshes updated, lag, healthy, last_error
@@ -55,11 +58,27 @@ load_restic_env() {
   rm -f "$envf"
   export RESTIC_CACHE_DIR=${RESTIC_CACHE_DIR:-/cache}
 }
+# The bucket bills by the request (Backblaze gives a few thousand free a day), so a push that worked last time does not
+# check the repository again first; the first push after a failure does.
 ensure_repo() {
-  restic cat config >/dev/null 2>&1 && return 0
+  [ -f "$LOCKDIR/repo-ok" ] && return 0
+  if restic cat config >/dev/null 2>&1; then : > "$LOCKDIR/repo-ok"; return 0; fi
   # no repository yet (or the bucket is unreachable): try to create it, the error says which
-  local out; out=$(restic init 2>&1) && return 0
+  local out; out=$(restic init 2>&1) && { : > "$LOCKDIR/repo-ok"; return 0; }
   echo "$out" | tail -1 | cut -c1-200 >&2; return 1
+}
+# Why does the bucket refuse? One call to Backblaze's own login answers it. Prints a plain-words sentence.
+b2_refusal() {
+  local ep=${BACKUP_S3_ENDPOINT:-} r code
+  case "$ep" in *backblazeb2.com*) ;; *) echo "The bucket refused the request (Access Denied). Check the bucket keys."; return 0;; esac
+  r=$(curl -s -m 20 -u "${BACKUP_S3_KEY:-}:${BACKUP_S3_SECRET:-}" https://api.backblazeb2.com/b2api/v3/b2_authorize_account 2>/dev/null) || r=""
+  code=$(jq -r '.code // empty' <<<"$r" 2>/dev/null)
+  case "$code" in
+    transaction_cap_exceeded) echo "Backblaze says the daily usage cap of this account is used up (transaction cap exceeded), so it refuses every request until midnight UTC. Raise the caps in Backblaze > Caps & Alerts. Pushes wait and try again every 10 minutes.";;
+    bad_auth_token|unauthorized|bad_request) echo "Backblaze does not accept the bucket key any more (it was changed, expired or removed). Put the current key in the backup settings.";;
+    "") if jq -e '.apiInfo' <<<"$r" >/dev/null 2>&1; then echo "The bucket key works but the bucket refuses this folder (Access Denied). The key may be limited to another bucket or folder."; else echo "Backblaze could not be reached to find out why the bucket refuses (Access Denied)."; fi;;
+    *) echo "Backblaze refused the request: $code.";;
+  esac
 }
 
 # ---- local base backups ------------------------------------------------------------

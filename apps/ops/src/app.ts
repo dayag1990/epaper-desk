@@ -158,7 +158,7 @@ export function buildApp(d: AppDeps) {
     const r = await fixes.logs(name, Math.min(tail, 2000));
     return html(reply, ui.logsPage(name, r.text, r.tail));
   });
-  app.get("/disk", async (_q, reply) => { const p = fixes.planClear(); return html(reply, ui.diskPage(p.items, p.total_bytes)); });
+  app.get("/disk", async (_q, reply) => { const p = await fixes.planClear(); return html(reply, ui.diskPage(p.items, p.total_bytes, p.kept)); });
   app.get("/history", async (_q, reply) => html(reply, ui.historyPage(log.recent(200))));
 
   // ---------- D10 ----------
@@ -223,7 +223,7 @@ export function buildApp(d: AppDeps) {
   // ---------- extra buttons ----------
   app.post("/ops/restart-all", async (req) => act(req, "restart everything", undefined, () => fixes.restartAll()));
   app.post("/ops/up", async (req) => act(req, "bring everything up", undefined, () => fixes.pullUp()));
-  app.get("/ops/disk/plan", async () => fixes.planClear());
+  app.get("/ops/disk/plan", async () => await fixes.planClear());
   app.post("/ops/disk/clear", async (req) => { const b = withConfirm(z.object({})).parse(req.body ?? {}); return act(req, "free disk space", undefined, () => fixes.clearDisk(b.confirm)); });
   app.get("/ops/releases", async () => ({ current: releases.current(), kept: await releases.list() }));
   app.post("/ops/alerts/test", async (req) => act(req, "test alert", undefined, async () => ({ ok: true as const, ...(await alerts.test()) })));

@@ -9,6 +9,8 @@ export interface BackupStatus {
   base: BackupSet | null; // newest nightly base backup
   drill: { at: string; result: "pass" | "fail" } | null;
 }
+export interface OldCopy { id: string; path: string; bytes: number; age_days: number; what: string }
+export interface OldCopies { items: OldCopy[]; kept: { what: string; reason: string }[]; total_bytes: number }
 export interface RestoreResult { id: string; counts: { table: string; live: number; restored: number }[] }
 
 /** A plain-words failure. The message is what the owner reads. */
@@ -20,6 +22,8 @@ export class BackupError extends Error {}
  *   backup-now.sh --status               print JSON: {files:{at,size_bytes},wal:{..},base:{..},drill:{at,result}}  (null for a set that does not exist)
  *   backup-now.sh --verify               run the restore drill
  *   backup-now.sh --snapshot "<reason>"  quick safety snapshot; prints {"id":"..."}
+ *   backup-now.sh --old-copies          JSON {items:[{id,path,bytes,age_days,what}],kept:[{what,reason}],total_bytes}: old safety dumps / restored databases that may be freed
+ *   backup-now.sh --discard-copies <id>...   delete those; prints {removed:[],refused:[]} (only ids the list holds)
  *   restore.sh db --to <ISO time>        build a second Postgres at that minute; prints {"id","counts":[{table,live,restored}]}
  *   restore.sh db-switch <id>            switch to the restored copy (old one is kept 7 days)
  *   restore.sh files --scope file|edition|all --at <ISO time>
@@ -32,6 +36,8 @@ export interface BackupDriver {
   restoreDb(to: string): Promise<RestoreResult>;
   switchDb(id: string): Promise<void>;
   restoreFiles(scope: "file" | "edition" | "all", at: string): Promise<void>;
+  oldCopies(): Promise<OldCopies>;
+  discardCopies(ids: string[]): Promise<{ removed: string[]; refused: string[] }>;
 }
 
 type Run = (file: string, args: string[], timeoutMs: number) => Promise<string>;
@@ -64,6 +70,8 @@ export class ScriptBackupDriver implements BackupDriver {
   async verify() { await this.go("backup-now.sh", ["--verify"]); }
   async snapshot(reason: string) { return this.json<{ id: string }>(await this.go("backup-now.sh", ["--snapshot", reason], 900_000), "snapshot"); }
   async restoreDb(to: string) { return this.json<RestoreResult>(await this.go("restore.sh", ["db", "--to", to]), "restore"); }
+  async oldCopies() { return this.json<OldCopies>(await this.go("backup-now.sh", ["--old-copies"], 120_000), "old copies"); }
+  async discardCopies(ids: string[]) { return this.json<{ removed: string[]; refused: string[] }>(await this.go("backup-now.sh", ["--discard-copies", ...ids], 900_000), "discard"); }
   async switchDb(id: string) { await this.go("restore.sh", ["db-switch", id]); }
   async restoreFiles(scope: string, at: string) { await this.go("restore.sh", ["files", "--scope", scope, "--at", at]); }
 }
