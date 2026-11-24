@@ -102,3 +102,23 @@ describe("package details", () => {
     expect((await validateIdml(new Uint8Array([1, 2, 3]))).ok).toBe(false);
   });
 });
+
+describe("photo caption", () => {
+  it("is a text frame of its own (style Story-caption), its text keeps the credit, and the package still validates", async () => {
+    const CAP = "File photo · Photo: Jane Doe, CC BY 4.0, Wikimedia Commons";
+    const caps = en.pages.flatMap((p) => p.frames).filter((f) => f.role === "caption");
+    expect(caps.length).toBeGreaterThan(0); // the English fixture photos carry captions, so the layout made caption frames
+    const first = caps[0]!;
+    const withCap: LayoutSnapshot = { ...en, pages: en.pages.map((p) => ({ ...p, frames: p.frames.map((f) => (f === first ? { ...f, text: CAP } : f)) })) };
+    const { bytes, styles } = await exportIdml(withCap);
+    const zip = await JSZip.loadAsync(bytes);
+    const stories = await Promise.all(Object.keys(zip.files).filter((n) => n.startsWith("Stories/")).map((n) => zip.files[n]!.async("string")));
+    const hit = stories.filter((x) => x.includes("Jane Doe, CC BY 4.0, Wikimedia Commons"));
+    expect(hit).toHaveLength(1);
+    expect(hit[0]).toContain("ParagraphStyle/Story-caption");
+    expect(styles).toContain("Story-caption");
+    const rep = await validateIdml(bytes, withCap);
+    expect(rep.problems).toEqual([]);
+    expect(rep.ok).toBe(true);
+  });
+});

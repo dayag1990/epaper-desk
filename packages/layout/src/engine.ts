@@ -68,6 +68,14 @@ export class LayoutEngine {
     return this.page.evaluate(domLines);
   }
 
+  /** Font sizes (px on the canvas) of the caption and of the credit run, on the page loaded last (0 when there is none). */
+  async captionSizes(): Promise<{ caption: number; credit: number }> {
+    return this.page.evaluate(() => {
+      const c = document.querySelector(".cap"), r = document.querySelector(".cap .credit");
+      return { caption: c ? parseFloat(getComputedStyle(c).fontSize) : 0, credit: r ? parseFloat(getComputedStyle(r).fontSize) : 0 };
+    });
+  }
+
   /** Word-space growth, characters per line and rag of the body text of the page loaded last (see domSpaceStats). */
   async spaceStats(extraCss = ""): Promise<SpaceStat[]> {
     if (extraCss) await this.page.addStyleTag({ content: extraCss });

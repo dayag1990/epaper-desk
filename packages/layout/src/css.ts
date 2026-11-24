@@ -47,6 +47,9 @@ export function paperCss(t: Template, opts: CssOptions = {}): string {
 .sub{font-weight:700;font-size:18px;line-height:1.4;margin:0 0 10px;padding-left:10px;border-left:5px solid var(--red)}
 .fig{margin:4px 0 12px;aspect-ratio:var(--ar,1.78);background:#e6e2d6;overflow:hidden;position:relative}
 .fig img{width:100%;height:100%;object-fit:cover;display:block}
+.fig.has-cap{margin-bottom:5px}
+.cap{font-size:12px;line-height:1.4;color:#3d3a33;margin:0 0 12px}
+.cap .credit{font-size:10px;color:#6a665c;font-weight:400}
 .body{columns:var(--cols,2);column-gap:${t.body.col_gap_px}px;column-rule:1px solid #cfcabd;font-size:var(--fs);line-height:${t.body.line_height};text-align:justify}
 .body p{margin:0 0 .45em;widows:2;orphans:2}
 .body p+p{text-indent:1.2em}

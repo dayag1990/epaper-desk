@@ -139,6 +139,21 @@ describe("snapshot path", () => {
     for (const z of zones) ZoneSchema.parse(z);
   });
 
+  it("the caption line (credit included) is part of its story's tap zone", () => {
+    const withCap = LayoutSnapshotSchema.parse({
+      ...snapshot,
+      pages: [{ ...snapshot.pages[0], frames: [
+        { id: "it_1.head", item: "it_1", role: "head", x: 33, y: 53, w: 99, h: 26.5, text: articles[0].headline },
+        { id: "it_1.img", item: "it_1", role: "image", x: 33, y: 79.5, w: 99, h: 100 },
+        { id: "it_1.caption", item: "it_1", role: "caption", x: 33, y: 179.5, w: 99, h: 10, text: "File photo · Photo: Jane Doe, CC BY 4.0, Wikimedia Commons" },
+        { id: "it_1.body", item: "it_1", role: "body", x: 33, y: 190, w: 99, h: 100, cols: 2 },
+      ] }],
+    });
+    const [z] = zoneFromSnapshot(withCap.pages[0], articles);
+    expect(z!.rects[0]![1] + z!.rects[0]![3]).toBeCloseTo(290 / 530, 5);
+    expect(zoneFromSnapshot(withCap.pages[0], articles)).toHaveLength(1);
+  });
+
   it("buildEdition uses the snapshot for pages it has and text for the rest", async () => {
     const o = await mkdtemp(join(tmpdir(), "ep-snap-"));
     try {

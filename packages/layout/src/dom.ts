@@ -89,6 +89,8 @@ export function domFrames(): RawPage {
         focal: im ? ((im.style.objectPosition || "50% 50%").split(" ").map((v) => parseFloat(v) / 100) as [number, number]) : [0.5, 0.5],
       });
     }
+    const cap = s.querySelector<HTMLElement>(".cap");
+    if (cap) frames.push({ item, role: "caption", ...rect(cap), fontPx: parseFloat(cs(cap).fontSize), fontFamily: fam(cap), text: (cap.textContent ?? "").replace(/\s+/g, " ").trim() });
     const b = s.querySelector<HTMLElement>(".body");
     if (b) {
       const bs = cs(b);
@@ -143,7 +145,7 @@ export function domLines(): DomLine[] {
   page.querySelectorAll(".mast .name, .mast .tag, .strip > *").forEach((el, i) => els.push({ el, key: `furniture.${el.className || el.tagName.toLowerCase()}.${i}` }));
   page.querySelectorAll<HTMLElement>(".story").forEach((s) => {
     const item = s.dataset.item ?? "";
-    s.querySelectorAll(".kicker, .head, .sub").forEach((el) => els.push({ el, key: `${item}.${el.className.split(" ")[0]}` }));
+    s.querySelectorAll(".kicker, .head, .sub, .cap, .cap .credit").forEach((el) => els.push({ el, key: `${item}.${el.className.split(" ")[0]}` }));
     s.querySelectorAll(".body p").forEach((el, i) => els.push({ el, key: `${item}.body.${i}` }));
   });
   for (const { el, key } of els) {
