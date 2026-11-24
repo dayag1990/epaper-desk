@@ -23,12 +23,14 @@ export async function editionAutoplan(e: Envelope) {
   if (!ed) return;
   try {
     const templates = templateSet(ed.template_set);
+    // the masthead is the paper's own name (papers.name), not the demo name written in the template
+    const paper = await prisma.paper.findUniqueOrThrow({ where: { id: e.paper_id } });
     let articles = await loadArticles(e.paper_id, { ids: e.payload.article_ids, date: e.payload.date });
     if (!articles.length) throw new Error("There are no articles to plan. Sync a source first.");
     // make sure the pictures are in the store before laying out (idempotent)
     for (const a of articles) for (const im of a.images) await fetchAsset(e.paper_id, { article_id: a.id, asset_id: im.asset_id, src: im.src, caption: im.caption, credit: im.credit }).catch((err) => console.log("picture skipped:", (err as Error).message));
     const renderArticles = await articlesForRender(e.paper_id, articles);
-    const plan = await pool.withEngine((eng) => autoPlan(eng, renderArticles, templates, { pages: e.payload.pages, date: formatEditionDate(ed.date, templates[0]!) ?? stripDate(ed.date), sectionPages: e.payload.sections ?? templates[0]!.section_order }));
+    const plan = await pool.withEngine((eng) => autoPlan(eng, renderArticles, templates, { pages: e.payload.pages, masthead: paper.name, date: formatEditionDate(ed.date, templates[0]!) ?? stripDate(ed.date), sectionPages: e.payload.sections ?? templates[0]!.section_order }));
     for (const pp of plan.pages) {
       const doc = PageDocSchema.parse(pp.fit.doc);
       const snap = await pool.withEngine((eng) => eng.snapshot(edRef(ed.id), [{ doc, template: pp.template }], renderArticles));

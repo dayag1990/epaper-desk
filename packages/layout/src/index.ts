@@ -5,6 +5,7 @@ export * from "./pack.js";
 export * from "./fit.js";
 export * from "./css.js";
 export * from "./fonts.js";
+export * from "./caption.js";
 export * from "./render.js";
 export * from "./dom.js";
 export * from "./engine.js";

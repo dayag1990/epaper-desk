@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { chromium, type Browser } from "playwright";
 import { PDFDocument } from "pdf-lib";
 import type { Article, PageDoc } from "@epaper/core";
+import { SCREEN_IMAGES, recompressPdfImages, type ScreenImageOptions } from "./pdf-images.js";
 import { SERVER_FONT_BASE, installFonts, renderDocument, renderPage, type Template } from "@epaper/layout";
 
 export interface EditionPage { doc: PageDoc; template: Template }
@@ -18,6 +19,11 @@ export interface ScreenPdfOptions {
   perPage?: boolean;
   /** When given, files are written here. */
   outDir?: string;
+  /**
+   * Pictures in the screen PDF are scaled down and stored as JPEG (default: 1280 px long edge, quality 75). `false` keeps
+   * them as Chromium wrote them (full size). Only the screen PDF does this: the originals stay in the files store for print and IDML.
+   */
+  images?: ScreenImageOptions | false;
 }
 export interface PdfFile { name: string; bytes: Buffer; page?: number }
 export interface ScreenPdfResult {
@@ -79,7 +85,7 @@ async function exactBoxes(raw: Buffer, w_mm: number, h_mm: number): Promise<Buff
   return Buffer.from(await doc.save({ useObjectStreams: false }));
 }
 
-async function printPdf(browser: Browser, html: string, w_mm: number, h_mm: number): Promise<Buffer> {
+async function printPdf(browser: Browser, html: string, w_mm: number, h_mm: number, images: ScreenImageOptions | false): Promise<Buffer> {
   const ctx = await browser.newContext();
   try {
     const page = await ctx.newPage();
@@ -88,7 +94,7 @@ async function printPdf(browser: Browser, html: string, w_mm: number, h_mm: numb
     // faces load lazily: ask for each one, then wait, so the PDF is never printed with a fallback font
     await page.evaluate(() => { const faces: FontFace[] = []; document.fonts.forEach((f) => faces.push(f)); return Promise.all(faces.map((f) => f.load())).then(() => document.fonts.ready).then(() => undefined); });
     const raw = await page.pdf({ width: mm(w_mm), height: mm(h_mm), preferCSSPageSize: true, printBackground: true, margin: { top: "0", right: "0", bottom: "0", left: "0" } });
-    return await exactBoxes(raw, w_mm, h_mm);
+    return await exactBoxes(images ? (await recompressPdfImages(raw, images)).bytes : raw, w_mm, h_mm);
   } finally {
     await ctx.close();
   }
@@ -98,17 +104,18 @@ async function printPdf(browser: Browser, html: string, w_mm: number, h_mm: numb
 export async function exportScreenPdf(opts: ScreenPdfOptions): Promise<ScreenPdfResult> {
   const t0 = Date.now();
   const articles = opts.articles ?? [];
+  const images = opts.images === undefined ? SCREEN_IMAGES : opts.images;
   const whole = buildPrintHtml(opts.pages, articles, `${opts.paper} ${opts.date}`);
-  const hash = createHash("sha256").update(whole.html).update(`${whole.w_mm}x${whole.h_mm}`).digest("hex");
+  const hash = createHash("sha256").update(whole.html).update(`${whole.w_mm}x${whole.h_mm}`).update(images ? `img${images.max_edge}q${images.quality}` : "img-full").digest("hex");
   const base = `${slug(opts.paper)}_${slug(opts.date)}`;
   const browser = opts.browser ?? (await chromium.launch());
   try {
-    const edition: PdfFile = { name: `${base}_${hash.slice(0, 10)}.pdf`, bytes: await printPdf(browser, whole.html, whole.w_mm, whole.h_mm) };
+    const edition: PdfFile = { name: `${base}_${hash.slice(0, 10)}.pdf`, bytes: await printPdf(browser, whole.html, whole.w_mm, whole.h_mm, images) };
     const pages: PdfFile[] = [];
     if (opts.perPage) {
       for (const p of opts.pages) {
         const one = buildPrintHtml([p], articles, `${opts.paper} ${opts.date} p${p.doc.page.no}`);
-        pages.push({ name: `${base}_p${String(p.doc.page.no).padStart(2, "0")}.pdf`, page: p.doc.page.no, bytes: await printPdf(browser, one.html, one.w_mm, one.h_mm) });
+        pages.push({ name: `${base}_p${String(p.doc.page.no).padStart(2, "0")}.pdf`, page: p.doc.page.no, bytes: await printPdf(browser, one.html, one.w_mm, one.h_mm, images) });
       }
     }
     if (opts.outDir) {

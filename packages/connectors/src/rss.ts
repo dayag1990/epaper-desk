@@ -18,7 +18,7 @@ export type RssConfig = z.infer<typeof RssConfigSchema>;
 /** One feed entry in a shape that does not care if it came from RSS 2.0, RDF or Atom. */
 export interface FeedItem {
   id: string; link: string; title: string; summary: string; content_html: string; subhead: string;
-  author: string; published: string; updated: string; categories: string[]; image: string; image_caption: string;
+  author: string; published: string; updated: string; categories: string[]; image: string; image_caption: string; image_credit: string;
 }
 
 export const RSS_DEFAULT_MAPPING: Mapping = {
@@ -32,6 +32,7 @@ export const RSS_DEFAULT_MAPPING: Mapping = {
   tags: "$.categories",
   "images[0].src": "$.image",
   "images[0].caption": "$.image_caption",
+  "images[0].credit": "$.image_credit",
   published_at: "$.published | parse_date('UTC')",
   updated_at: "$.updated | parse_date('UTC')",
 };
@@ -43,6 +44,19 @@ const txt = (x: any): string => {
   if (typeof x === "object") return String(x["#text"] ?? x.name ?? x["@_href"] ?? "");
   return "";
 };
+
+/** Caption and credit of the lead picture, from Media RSS (<media:description>, <media:credit>, on the item, in <media:content> or in <media:group>) or the first <figcaption> of the story HTML. */
+function pictureText(it: any, contentHtml: string): { caption: string; credit: string } {
+  const group = arr(it["media:group"])[0];
+  const holders = [...arr(it["media:content"]), ...arr(group?.["media:content"]), group, it].filter((h) => h && typeof h === "object");
+  const pick = (k: string): string => {
+    for (const h of holders) { const t = clean(txt(arr((h as any)[k])[0])); if (t) return t; }
+    return "";
+  };
+  const fig = /<figcaption[^>]*>([\s\S]*?)<\/figcaption>/i.exec(contentHtml)?.[1] ?? "";
+  return { caption: pick("media:description") || clean(fig.replace(/<[^>]+>/g, " ")), credit: pick("media:credit") };
+}
+const clean = (s: string): string => s.replace(/\s+/g, " ").trim();
 
 export function parseFeed(xml: string, baseUrl: string): FeedItem[] {
   const p = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "@_", textNodeName: "#text", processEntities: true, trimValues: true, removeNSPrefix: false });
@@ -63,6 +77,7 @@ export function parseFeed(xml: string, baseUrl: string): FeedItem[] {
     const desc = txt(it.description);
     const enc = arr(it.enclosure).find((e: any) => /^image\//.test(e?.["@_type"] ?? "") || /\.(jpe?g|png|webp|gif)(\?|$)/i.test(e?.["@_url"] ?? ""));
     const media = arr(it["media:content"] ?? it["media:thumbnail"])[0];
+    const pic = pictureText(it, content || desc);
     out.push({
       id: txt(it.guid) || link,
       link,
@@ -75,7 +90,8 @@ export function parseFeed(xml: string, baseUrl: string): FeedItem[] {
       updated: txt(it["atom:updated"] ?? it.pubDate ?? it["dc:date"]),
       categories: arr(it.category).map(txt).filter(Boolean),
       image: absUrl(enc?.["@_url"] ?? media?.["@_url"], baseUrl) ?? "",
-      image_caption: "",
+      image_caption: pic.caption,
+      image_credit: pic.credit,
     });
   }
   for (const e of atomEntries) {
@@ -86,6 +102,7 @@ export function parseFeed(xml: string, baseUrl: string): FeedItem[] {
     const content = txt(e.content);
     const summary = txt(e.summary);
     const media = arr(e["media:thumbnail"] ?? e["media:content"])[0];
+    const pic = pictureText(e, content || summary);
     out.push({
       id: txt(e.id) || link,
       link,
@@ -98,7 +115,8 @@ export function parseFeed(xml: string, baseUrl: string): FeedItem[] {
       updated: txt(e.updated ?? e.published),
       categories: arr(e.category).map((c: any) => (typeof c === "string" ? c : c?.["@_term"] ?? "")).filter(Boolean),
       image: absUrl(imgLink?.["@_href"] ?? media?.["@_url"], baseUrl) ?? "",
-      image_caption: "",
+      image_caption: pic.caption,
+      image_credit: pic.credit,
     });
   }
   return out;

@@ -1,5 +1,6 @@
 import type { Article, PageDoc, PageItem } from "@epaper/core";
 import { packSpans } from "./pack.js";
+import { splitCaption } from "./caption.js";
 import { paperCss } from "./css.js";
 import { colsForSpan, type Template } from "./template.js";
 import { round, storedBodyPx } from "./units.js";
@@ -37,11 +38,27 @@ export function packedSpans(doc: PageDoc, t: Template): number[] {
   return packSpans(doc.items.map((i) => i.span ?? defaultSpan(i, t.columns)), t.columns);
 }
 
-function imageSrc(item: PageItem, articles: readonly Article[]): string | null {
+function articleImage(item: PageItem, articles: readonly Article[]): Article["images"][number] | null {
   if (!item.image) return null;
   const id = item.image.asset_id;
-  for (const a of articles) for (const im of a.images) if (im.asset_id === id) return im.src;
+  for (const a of articles) for (const im of a.images) if (im.asset_id === id) return im;
   return null;
+}
+const imageSrc = (item: PageItem, articles: readonly Article[]): string | null => articleImage(item, articles)?.src ?? null;
+
+/**
+ * The caption line under a photo: the caption in the page's caption size, the credit (when there is one) as a smaller run
+ * of the SAME line ("Photo: Jane Doe, CC BY 4.0, Wikimedia Commons"). It comes from the article, so a re-sync keeps it.
+ * Empty when the article has neither; an ad never has one.
+ */
+export function captionHtml(item: PageItem, articles: readonly Article[]): string {
+  if (item.kind === "ad") return "";
+  const im = articleImage(item, articles);
+  if (!im) return "";
+  const { text, credit } = splitCaption(im.caption, im.credit);
+  if (!text && !credit) return "";
+  const cr = credit ? `<span class="credit">${text ? "· " : ""}${esc(credit)}</span>` : "";
+  return `<div class="cap" data-asset="${esc(item.image!.asset_id)}">${text ? esc(text) + (credit ? " " : "") : ""}${cr}</div>`;
 }
 
 function figHtml(item: PageItem, src: string | null, isAd: boolean, editable: boolean): string {
@@ -75,10 +92,31 @@ function storyHtml(item: PageItem, span: number, articles: readonly Article[], t
   if (tx.kicker) parts.push(`<div class="kicker"${ed}${ph("Label")}>${esc(tx.kicker)}</div>`);
   if (editable || tx.head) parts.push(`<h2 class="head" data-style="${esc(st.head)}"${ed}${ph("Headline")}>${esc(tx.head)}</h2>`);
   if (editable || tx.sub) parts.push(`<div class="sub" data-style="${esc(st.sub)}"${ed}${ph("Sub-headline (optional)")}>${esc(tx.sub ?? "")}</div>`);
-  if (item.image) parts.push(figHtml(item, src, false, editable));
+  if (item.image) {
+    const cap = src ? captionHtml(item, articles) : "";
+    parts.push(cap ? figHtml(item, src, false, editable).replace('class="fig"', 'class="fig has-cap"') + cap : figHtml(item, src, false, editable));
+  }
   const paras = tx.body.length ? tx.body : [""];
   parts.push(`<div class="body" data-style="${esc(st.body)}"${ed}>${paras.map((p) => `<p>${esc(p)}</p>`).join("")}</div>`);
   return `<article ${attrs}>${parts.join("")}</article>`;
+}
+
+/**
+ * The masthead name stays on ONE line: a long paper name ("The Riverton Herald") would otherwise wrap in the red band and push the
+ * page down. Its size shrinks only when the name would not fit next to the tagline (about 0.62 em per character; the band's
+ * room is the canvas minus page padding, band padding, the tagline's minimum width and the gap).
+ */
+export function mastNameSize(name: string, t: Pick<Template, "canvas_px" | "pad" | "masthead_px">): number {
+  const room = t.canvas_px - t.pad.left - t.pad.right - 56 - 120 - 24;
+  const len = [...name].length || 1;
+  return Math.min(t.masthead_px.name, Math.floor(room / (len * 0.62)));
+}
+function mastName(name: string, t: Template, editable: boolean): string {
+  if (!editable && !name) return "";
+  const px = mastNameSize(name, t);
+  const small = px < t.masthead_px.name ? ` style="font-size:${px}px"` : "";
+  const ed = editable ? ` contenteditable="true" spellcheck="false" data-ph="Newspaper name"` : "";
+  return `<div class="name"${small}${ed}>${esc(name)}</div>`;
 }
 
 /**
@@ -100,7 +138,7 @@ export function renderPage(doc: PageDoc, template: Template, articles: readonly 
     editable || text ? `<${tag}${cls ? ` class="${cls}"` : ""}${ed}${ph(ph0)}>${esc(text)}</${tag}>` : "";
   const head =
     doc.page.no === 1
-      ? `<div class="mast">${cell("div", "name", f.masthead, "Newspaper name")}${cell("div", "tag", f.tagline, "Tagline / website")}</div>` +
+      ? `<div class="mast">${mastName(f.masthead, t, editable)}${cell("div", "tag", f.tagline, "Tagline / website")}</div>` +
         `<div class="strip">${strip.map((s, i) => cell("span", "", s, ["EDITION · CITY", "DAY, DATE", "PAGES · PRICE"][i]!)).join("")}</div>`
       : `<div class="strip inner">${cell("span", "sec", strip[0]!, "Section name")}${cell("span", "", strip[1]!, "DAY, DATE")}${cell("span", "", strip[2]!, "PAGE")}</div>`;
   const stories = doc.items.map((it, n) => storyHtml(it, spans[n]!, articles, t, editable)).join("");

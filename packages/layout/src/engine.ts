@@ -68,6 +68,25 @@ export class LayoutEngine {
     return this.page.evaluate(domLines);
   }
 
+  /** Font sizes (px on the canvas) of the caption and of the credit run, on the page loaded last (0 when there is none). */
+  async captionSizes(): Promise<{ caption: number; credit: number }> {
+    return this.page.evaluate(() => {
+      const c = document.querySelector(".cap"), r = document.querySelector(".cap .credit");
+      return { caption: c ? parseFloat(getComputedStyle(c).fontSize) : 0, credit: r ? parseFloat(getComputedStyle(r).fontSize) : 0 };
+    });
+  }
+
+  /** The masthead name on the page loaded last: its font size and how many lines it takes. */
+  async mastheadBox(): Promise<{ fontPx: number; lines: number }> {
+    return this.page.evaluate(() => {
+      const n = document.querySelector<HTMLElement>(".mast .name");
+      if (!n) return { fontPx: 0, lines: 0 };
+      const cs = getComputedStyle(n);
+      const lh = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.2;
+      return { fontPx: parseFloat(cs.fontSize), lines: Math.round((n.getBoundingClientRect().height - parseFloat(cs.paddingBottom || "0")) / lh) };
+    });
+  }
+
   /** Word-space growth, characters per line and rag of the body text of the page loaded last (see domSpaceStats). */
   async spaceStats(extraCss = ""): Promise<SpaceStat[]> {
     if (extraCss) await this.page.addStyleTag({ content: extraCss });

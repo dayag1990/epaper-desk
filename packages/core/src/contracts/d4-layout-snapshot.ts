@@ -4,7 +4,8 @@ import { Fraction, Mm } from "../common.js";
 
 // D4: what every exporter reads. mm, origin page top-left.
 
-export const FrameRoleSchema = z.enum(["masthead", "strip", "kicker", "head", "sub", "body", "image", "ad"]);
+// "caption" (the photo caption line, credit included) was added after the first freeze: a new value, nothing renamed.
+export const FrameRoleSchema = z.enum(["masthead", "strip", "kicker", "head", "sub", "body", "image", "ad", "caption"]);
 
 export const FrameSchema = z.object({
   id: z.string().min(1), // e.g. "it_1.head" (item id + role), so not a plain prefixed id

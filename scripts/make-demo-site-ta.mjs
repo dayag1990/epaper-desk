@@ -122,7 +122,8 @@ function rss() {
         `<item><title>${esc(a.headline)}</title><link>${url(a)}</link><guid isPermaLink="true">${url(a)}</guid><pubDate>${rfc822(a.published_at)}</pubDate>` +
         `<dc:creator>${esc(a.byline)}</dc:creator><category>${esc(a.section)}</category><description>${esc(a.standfirst)}</description>` +
         `<content:encoded>${cdata(html)}</content:encoded>` +
-        (a.image_file ? `<media:content url="${imgUrl(a)}" medium="image" type="image/jpeg"/>` : "") +
+        // the caption line (with the photo credit when the licence asks for one) travels in the feed as <media:description>
+        (a.image_file ? `<media:content url="${imgUrl(a)}" medium="image" type="image/jpeg">${a.caption ? `<media:description>${esc(a.caption)}</media:description>` : ""}</media:content>` : "") +
         `</item>`
       );
     });

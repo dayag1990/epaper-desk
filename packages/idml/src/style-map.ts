@@ -18,6 +18,7 @@ export const ROLE_DEFAULT_STYLE = {
   head: "Story-head",
   sub: "Story-sub-head",
   body: "Story-body",
+  caption: "Story-caption",
 } as const;
 
 export const DEFAULT_STYLE_MAP: StyleMap = {

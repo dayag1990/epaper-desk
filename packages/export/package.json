@@ -22,6 +22,7 @@
     "@epaper/core": "workspace:*",
     "@epaper/layout": "workspace:*",
     "pdf-lib": "1.17.1",
-    "playwright": "1.49.1"
+    "playwright": "1.49.1",
+    "sharp": "0.33.5"
   }
 }
