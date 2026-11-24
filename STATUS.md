@@ -97,7 +97,7 @@ Start: 2026-11-23 22:58 IST (2026-11-23 17:28 UTC) · Demo-ready target: 2026-11
 - (2026-11-24, ops drill) The off-box bucket key is refused (Access Denied) on any prefix except the live one, so scripts/backup-drill.sh could not run against the real bucket; drills used a local restic repository as a stand-in. Restore from the REAL bucket is unproven since the key was restricted.
 ## Cut                 (what was cut under the cut order, and when)
 ## Log                 (one line per hour, newest first)
-- 2026-11-24 · M13 break-it drills a b c d f g run in a throwaway project and fixed (see Done); RUNBOOK.md written; branch ops-drill, not merged.
+- 2026-11-24 · M13 break-it drills a b c d f g run in a throwaway project and fixed (see Done); RUNBOOK.md written; branch ops-drill MERGED to main (71 ops tests + 21 dockerguard tests re-run by lead) and the live ops desk rebuilt/recreated alone (--no-deps), healthy; api, worker, postgres untouched.
 - 2026-11-23 · Hour ~5 · plan-balance, backup (LIVE), ops desk (LIVE), editor-select merged; Tamil demo T1 + T2 started.
 - 2026-11-23 · Hour 4–5 · JOIN merged, live stack rebuilt, reader on 8102; running: ops desk, backup (local WAL + restic), M12 admin. Branch `backup/pre-strip` renamed `archive-pre-strip`.
 - 2026-11-23 · Hour 3 · M9, M2 merged; backup test blocked on key ID; lead session switched to Sonnet at the owner's request (Opus for hard debugging/review only).
