@@ -15,6 +15,8 @@ if [ -n "${BACKUP_REPO_LOCAL:-}" ]; then   # the compose files are read when the
   export OPS_COMPOSE_FILES="$REPO_DIR/docker-compose.yml:$REPO_DIR/ops/drill/docker-compose.restore-drill.yml"; COMPOSE_ARGS=(-f "$REPO_DIR/docker-compose.yml" -f "$REPO_DIR/ops/drill/docker-compose.restore-drill.yml")
 fi
 [ "$PROJECT" = epaper ] && { echo "refusing to run on the live project" >&2; exit 2; }
+# Owner rule 2026-11-24: drills never write or delete in the real bucket. This drill writes and prunes a repository, so it needs a local one.
+[ -n "${BACKUP_REPO_LOCAL:-}" ] || { echo "refusing: this drill writes and deletes in its repository. Set BACKUP_REPO_LOCAL=<empty folder> to use a local one. For the real bucket use scripts/restore-readonly-drill.sh (read only)." >&2; exit 2; }
 W=$(mktemp -d /tmp/epaper-drill.XXXXXX); ROOT="$W/root"
 export BACKUP_ROOT="$ROOT" BACKUP_PREFIX=epaper-drill PG_CONTAINER=epaper-bk-postgres BK_CONTAINER=epaper-bk-backup
 export EPAPER_ENV=${EPAPER_ENV:-/srv/epaper/.env}
