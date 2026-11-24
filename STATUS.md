@@ -94,3 +94,5 @@ Start: 2026-11-23 22:58 IST (2026-11-23 17:28 UTC) · Demo-ready target: 2026-11
 - 2026-11-23 · Hour 0 · contracts merged to main; M4 and M1 agents started.
 - 2026-11-23 · Hour 0 · host set up (swap, Docker, Node, firewall); stand-in .env; 3 Sonnet agents started on contracts, M0, toolchain.
 - 2026-11-23 17:28 UTC · Hour 0 · owner wrote "build". Clock started. Target: demo-ready at +48 h (owner instruction), contract deadline +72 h.
+
+- 2026-11-24 Tamil paper live: `thenpothigai`, 40 stories + 29 free-licence photos (credits in captions), ingested from the RSS feed of a second demo-site container (/demo-site-ta/), auto-plan 8 pages (93–100% full), screen PDF, e-paper published. Reader: http://localhost:8102/?paper=thenpothigai. Open: pages 2 and 3 fit at ~7.5 pt body (stories trimmed further if wanted); photos are real places, not pictures of the invented stories (captions say "file photo"); 27 duplicate articles from a first scrape are hidden in the live DB; InDesign/native-Tamil checks still the owner's. Renders now use a 1600 px copy of each photo (5000 px originals froze the page renderer); originals stay for print/IDML.
