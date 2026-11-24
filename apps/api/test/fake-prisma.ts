@@ -57,7 +57,8 @@ export function makeFake() {
   return {
     paper: table(), user: table(), membership: table([]), session: table(), apiKey: table(), source: table(),
     article: table(), edition: table(), page: table(), pageVersion: table(), export: table(), epEdition: table(),
-    webhook: table(), webhookDelivery: table(), auditLog: table(),
+    webhook: table(), webhookDelivery: table(), auditLog: table(), pageArticle: table([]), asset: table(),
+    async $transaction(ops: any) { return Array.isArray(ops) ? Promise.all(ops) : ops({}); },
   };
 }
 export type Fake = ReturnType<typeof makeFake>;

@@ -20,7 +20,7 @@ export async function exportRun(e: Envelope, job: JobCtx) {
     await save("running");
     const ed = await prisma.edition.findUniqueOrThrow({ where: { id: ex.edition_id } });
     const paper = await prisma.paper.findUniqueOrThrow({ where: { id: e.paper_id } });
-    const rows = await prisma.page.findMany({ where: { edition_id: ed.id }, orderBy: { no: "asc" } });
+    const rows = await prisma.page.findMany({ where: { edition_id: ed.id, deleted_at: null }, orderBy: { no: "asc" } });
     if (!rows.length) throw new Error("This edition has no pages.");
     const templates = templateSet(ed.template_set);
     const docs = rows.map((r) => PageDocSchema.parse(r.doc));

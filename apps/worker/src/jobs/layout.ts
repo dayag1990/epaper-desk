@@ -59,7 +59,7 @@ export async function editionAutoplan(e: Envelope) {
 
 /** Measure and fit one page in Chromium, store the fit report and a snapshot for that version. If the fitted text size differs, it is saved as the next version by "system" (unless someone saved meanwhile). */
 export async function pageFit(e: Envelope) {
-  const page = await prisma.page.findFirst({ where: { id: e.payload.page_id, paper_id: e.paper_id }, include: { edition: true } });
+  const page = await prisma.page.findFirst({ where: { id: e.payload.page_id, paper_id: e.paper_id, deleted_at: null }, include: { edition: true } });
   if (!page) return;
   const doc0 = PageDocSchema.parse(page.doc);
   const templates = templateSet(page.edition.template_set);

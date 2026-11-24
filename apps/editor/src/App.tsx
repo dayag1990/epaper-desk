@@ -21,6 +21,8 @@ export function App({ store, api, cfg }: { store: EditorStore; api: Api; cfg: Ed
   const [panel, setPanel] = useState<Panel>(null);
   const [delArmed, setDelArmed] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [delPage, setDelPage] = useState(false);
+  const [delBusy, setDelBusy] = useState(false);
   const scroller = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const pickFor = useRef<string | null>(null);
@@ -230,6 +232,7 @@ export function App({ store, api, cfg }: { store: EditorStore; api: Api; cfg: Ed
         )}
         {isEditing && <button className="btn" data-testid="add-story" onClick={() => { const id = `it_${Date.now().toString(36)}`; if (edit(addStory(s.docs, pid, s.selected, id), [pid])) store.select(id); }}>Add story</button>}
         {canEdit && <button className="btn" onClick={() => setPanel(panel === "tray" ? null : "tray")}>Story tray{unplaced.length ? ` (${unplaced.length})` : ""}{stale.length ? " •" : ""}</button>}
+        {canEdit && <button className="btn r" data-testid="delete-page" disabled={s.order.length <= 1} title={s.order.length <= 1 ? "An edition needs at least one page." : undefined} onClick={() => setDelPage(true)}>Delete page</button>}
         <button className="btn" data-testid="versions-btn" onClick={() => setPanel(panel === "versions" ? null : "versions")}>Versions</button>
         {s.me?.ai_enabled && canEdit && <button className="btn ai" data-testid="ai-btn" onClick={() => setPanel(panel === "ai" ? null : "ai")}>AI suggestions</button>}
         {canEdit && <button className="btn" data-testid="status-btn" onClick={() => edit(setStatus(s.docs, pid, doc.status === "draft" ? "subbed" : "draft"), [pid])}>{doc.status === "draft" ? "Mark as subbed" : "Back to draft"}</button>}
@@ -306,6 +309,18 @@ export function App({ store, api, cfg }: { store: EditorStore; api: Api; cfg: Ed
             <div className="row">
               <button className="btn y" onClick={() => void store.resolveConflict("mine")}>Keep mine</button>
               <button className="btn" onClick={() => void store.resolveConflict("theirs")}>Take theirs</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {delPage && pid && (
+        <div className="modal" role="alertdialog" aria-labelledby="dp-t" data-testid="delete-page-confirm">
+          <div className="card">
+            <h3 id="dp-t">Delete page {s.nos[pid]}?</h3>
+            <p>The stories on this page go back to the story tray, so nothing written is lost. A copy of the page is kept. The pages after it move up one number and are measured again.</p>
+            <div className="row">
+              <button className="btn" disabled={delBusy} onClick={() => setDelPage(false)} autoFocus>Keep the page</button>
+              <button className="btn r" data-testid="delete-page-yes" disabled={delBusy} onClick={() => { setDelBusy(true); void store.deletePage(pid).finally(() => { setDelBusy(false); setDelPage(false); }); }}>{delBusy ? "Deleting…" : `Delete page ${s.nos[pid]}`}</button>
             </div>
           </div>
         </div>

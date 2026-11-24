@@ -249,6 +249,7 @@ model Page {
   locked_by       String?   @db.Uuid
   lock_expires_at DateTime?
   rev             Int       @default(1)
+  deleted_at      DateTime? // soft delete: the row, its versions and its history stay; `no` is parked below zero
   created_at      DateTime  @default(now())
   updated_at      DateTime  @default(now()) @updatedAt
 

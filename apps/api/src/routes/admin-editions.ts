@@ -14,7 +14,7 @@ export function adminEditionRoutes(app: App) {
     const p = req.principal!;
     const ed = await prisma.edition.findFirst({ where: { id: req.params.id, paper_id: p.paper_id } });
     if (!ed) throw notFound("That edition");
-    const pages = await prisma.page.findMany({ where: { edition_id: ed.id, paper_id: p.paper_id }, orderBy: { no: "asc" } });
+    const pages = await prisma.page.findMany({ where: { edition_id: ed.id, paper_id: p.paper_id, deleted_at: null }, orderBy: { no: "asc" } });
     const exps = await prisma.export.findMany({ where: { edition_id: ed.id, paper_id: p.paper_id }, orderBy: { created_at: "desc" }, take: 20 });
     const ep = await prisma.epEdition.findFirst({ where: { edition_id: ed.id, paper_id: p.paper_id }, orderBy: { created_at: "desc" } });
     const latest = new Map<string, (typeof exps)[number]>();
@@ -32,7 +32,7 @@ export function adminEditionRoutes(app: App) {
     const p = req.principal!;
     const ed = await prisma.edition.findFirst({ where: { id: req.params.id, paper_id: p.paper_id } });
     if (!ed) throw notFound("That edition");
-    const pages = await prisma.page.findMany({ where: { edition_id: ed.id, paper_id: p.paper_id, status: { not: "approved" } } });
+    const pages = await prisma.page.findMany({ where: { edition_id: ed.id, paper_id: p.paper_id, deleted_at: null, status: { not: "approved" } } });
     let done = 0;
     for (const pg of pages) {
       if (pg.locked_by && pg.locked_by !== p.user_id && pg.lock_expires_at && pg.lock_expires_at > new Date()) continue; // someone is editing it

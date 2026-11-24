@@ -20,7 +20,7 @@ export function exportRoutes(app: App, driver: FileDriver) {
     if (!ed) throw notFound("That edition");
     const { format } = req.body;
     if (format === "pdf_press") throw new ApiError(501, "not_built", "Press PDF needs the client's press profile and is phase 2. Use the screen PDF.");
-    const pages = await prisma.page.count({ where: { edition_id: ed.id } });
+    const pages = await prisma.page.count({ where: { edition_id: ed.id, deleted_at: null } });
     if (!pages) throw new ApiError(409, "no_pages", "This edition has no pages yet. Run auto-plan first.");
     const row = await prisma.export.create({ data: { paper_id: p.paper_id, edition_id: ed.id, format, created_by: p.user_id, log: [] } });
     const j = await enqueue("export.run", p.paper_id, { export_id: row.id, build_epaper: req.body.build_epaper }, `export:${row.id}`);

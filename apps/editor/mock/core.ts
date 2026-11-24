@@ -20,7 +20,7 @@ export interface MockRes {
   status: number;
   json?: unknown;
 }
-interface PageRow { paper: string; id: string; no: number; doc: PageDoc; rev: number; status: string; template_id: string; versions: { rev: number; at: string; user: Person; doc: PageDoc }[]; lock?: { user: Person; until: number } }
+interface PageRow { paper: string; id: string; no: number; doc: PageDoc; rev: number; status: string; template_id: string; versions: { rev: number; at: string; user: Person; doc: PageDoc }[]; lock?: { user: Person; until: number }; deleted?: boolean }
 
 export const USERS: Record<string, MockUser & { papers: string[] }> = {
   ana: { id: "usr_ana", name: "Ana Costa", role: "editor", papers: ["riverton-herald"] },
@@ -90,11 +90,11 @@ export class MockBackend {
     if ((m = /^\/v1\/editions\/([^/]+)$/.exec(path)) && r.method === "GET") {
       const found = this.seeds().find((x) => x.paper === here && x.seed.edition.id === m![1]);
       if (!found) return err(404, "not_found", "No such edition");
-      return { status: 200, json: { ...found.seed.edition, status: "open", pages: [...this.pages.values()].filter((p) => p.paper === here).map((p) => this.pageOut(p)), templates: found.seed.templates, articles: found.seed.articles } };
+      return { status: 200, json: { ...found.seed.edition, status: "open", pages: [...this.pages.values()].filter((p) => p.paper === here && !p.deleted).map((p) => this.pageOut(p)), templates: found.seed.templates, articles: found.seed.articles } };
     }
     if ((m = /^\/v1\/pages\/([^/]+)(?:\/(\w+))?$/.exec(path))) {
       const p = this.pages.get(m[1]!);
-      if (!p || p.paper !== here) return err(404, "not_found", "No such page");
+      if (!p || p.paper !== here || p.deleted) return err(404, "not_found", "No such page");
       return this.pageRoute(p, m[2], r, u);
     }
     if (path === "/v1/assets" && r.method === "POST") {
@@ -132,6 +132,17 @@ export class MockBackend {
       if (held) return err(423, "locked", `${held.name} is editing this page`, { locked_by: held });
       p.lock = { user: { id: u.id, name: u.name }, until: this.now() + this.lockTtlMs };
       return { status: 200, json: { locked_by: p.lock.user, expires_at: new Date(p.lock.until).toISOString() } };
+    }
+    if (!sub && r.method === "DELETE") {
+      if (u.role === "viewer") return err(403, "forbidden", "Your role cannot delete pages");
+      if (held) return err(423, "locked", `${held.name} is editing this page`, { locked_by: held });
+      if (p.status === "approved") return err(423, "approved", "This page is approved and locked. Reopen it before you delete it.");
+      const live = [...this.pages.values()].filter((x) => x.paper === p.paper && !x.deleted);
+      if (live.length <= 1) return err(409, "last_page", "This is the only page of the edition, so it cannot be deleted.");
+      p.deleted = true; p.lock = undefined; p.rev += 1;
+      const moved = live.filter((x) => x.no > p.no).sort((a, b) => a.no - b.no).map((x) => { x.no -= 1; x.rev += 1; x.doc = { ...x.doc, page: { ...x.doc.page, no: x.no }, rev: x.rev }; return { id: x.id, no: x.no, rev: x.rev }; });
+      p.no = -p.no;
+      return { status: 200, json: { deleted: { id: p.id, no: -p.no, rev: p.rev }, pages: moved, kept_as_version: p.rev } };
     }
     if (!sub && r.method === "PUT") {
       if (u.role === "viewer") return err(403, "forbidden", "Your role cannot save pages");

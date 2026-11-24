@@ -77,6 +77,8 @@ export class Api {
   cutout = async (assetId: string) => (await this.req<{ asset: AssetRecord }>("POST", `/v1/assets/${enc(assetId)}/cutout`, {})).asset;
   suggest = async (p: { task: "headline"; text: string; max_chars?: number; article_id?: string }) =>
     (await this.req<{ options: { text: string }[] }>("POST", "/v1/ai/suggest", p)).options;
+  /** Delete a page: the server keeps a version and a copy, later pages move up one number. */
+  deletePage = (id: string) => this.req<{ deleted: { id: string; no: number; rev: number }; pages: { id: string; no: number; rev: number }[] }>("DELETE", `/v1/pages/${enc(id)}`);
   lock = (id: string) => this.req<LockInfo>("POST", `/v1/pages/${enc(id)}/lock`, {});
   unlock = (id: string) => this.req<unknown>("DELETE", `/v1/pages/${enc(id)}/lock`);
 }

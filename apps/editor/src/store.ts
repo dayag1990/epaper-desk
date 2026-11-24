@@ -360,6 +360,32 @@ export class EditorStore {
       this.set({ notice: plainError(e, "go back to that version") });
     }
   }
+  /**
+   * Delete a page (the app has asked "are you sure?" first). Everything unsaved is saved first, so the kept version is the
+   * page as you see it. The server renumbers the later pages; then the edition is loaded again so the page numbers, the
+   * story tray and the fit meters are the server's truth, and the page that is now in this place is measured and refitted.
+   */
+  async deletePage(pid: string): Promise<boolean> {
+    const ed = this.state.edition;
+    if (!ed || !this.state.docs[pid]) return false;
+    const no = this.state.nos[pid] ?? 1;
+    await this.saveNow();
+    if (this.state.dirty.includes(pid)) { this.set({ notice: "This page has changes that are not saved yet, so it was not deleted. Try again in a moment." }); return false; }
+    await this.releaseLock();
+    try {
+      await this.api.deletePage(pid);
+    } catch (e) {
+      this.set({ notice: plainError(e, "delete this page") });
+      await this.setActive(pid);
+      return false;
+    }
+    await this.drafts.del(pid);
+    delete this.saved[pid];
+    const left = this.state.order.length - 1;
+    await this.load(ed.id, String(Math.min(no, Math.max(left, 1))));
+    this.set({ notice: `Page ${no} was deleted and a copy is kept. The pages after it moved up one number.` });
+    return true;
+  }
   /** Sub-editor tick: draft → subbed (no server call beyond the normal save). */
   async approve(pid: string, fitOk: boolean) {
     if (!fitOk) return this.set({ notice: "This page doesn't fit yet. Shorten or move a story, then approve." });

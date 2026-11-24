@@ -11,7 +11,10 @@ async function open(page: Page, user = "ana", extra: Record<string, unknown> = {
   await expect(page.getByTestId("fill-meter")).toContainText(/%/, { timeout: 15000 });
   await expect(page.getByTestId("fill-meter")).not.toHaveText("Measuring…");
 }
-const pct = async (page: Page) => +((await page.getByTestId("fill-meter").innerText()).match(/(\d+)% full|Overflow \+(\d+)%/) ?.slice(1).find(Boolean) ?? NaN);
+const pct = async (page: Page) => {
+  const m = (await page.getByTestId("fill-meter").innerText()).match(/(\d+)% full|Overflow \+(\d+)%/);
+  return m ? (m[1] ? +m[1] : 100 + +m[2]!) : NaN; // "Overflow +1%" means 101% full
+};
 const meterText = (page: Page) => page.getByTestId("fill-meter").innerText();
 const head = (page: Page, n = 0) => page.locator(".page .story .head").nth(n);
 
@@ -107,6 +110,47 @@ test("API down mid-edit: typing is kept and saved when it returns", async ({ pag
   await expect(page.getByTestId("save-state")).toHaveText("Saved", { timeout: 10000 });
   const ed = await (await request.get(`${API}/v1/editions/ed_demo`)).json();
   expect(JSON.stringify(ed.pages[0].doc)).toContain("TYPEDOFFLINE");
+});
+
+test("delete page: asks first, keeps the stories, renumbers, refits the page now in its place", async ({ page }) => {
+  await open(page);
+  const tabs = page.locator('[data-testid^="page-tab-"]');
+  const n0 = await tabs.count();
+  expect(n0).toBeGreaterThan(2);
+  await page.getByTestId("page-tab-2").click();
+  await expect(head(page)).toBeVisible();
+  const gone = await head(page).innerText();
+  await page.getByTestId("delete-page").click();
+  await expect(page.getByTestId("delete-page-confirm")).toContainText("Delete page 2?");
+  // "Keep the page" changes nothing
+  await page.getByRole("button", { name: "Keep the page" }).click();
+  await expect(page.getByTestId("delete-page-confirm")).toHaveCount(0);
+  expect(await tabs.count()).toBe(n0);
+  // now really delete
+  await page.getByTestId("delete-page").click();
+  await page.getByTestId("delete-page-yes").click();
+  await expect(page.getByTestId("toast")).toContainText("Page 2 was deleted", { timeout: 15000 });
+  await expect(tabs).toHaveCount(n0 - 1);
+  // page 2 is now what was page 3, and it was measured again
+  await expect(page.getByTestId("fill-meter")).toContainText(/%/, { timeout: 15000 });
+  await expect(head(page)).not.toHaveText(gone);
+  // the stories of the deleted page are back in the tray
+  await page.getByRole("button", { name: /Story tray/ }).click();
+  await expect(page.getByTestId("panel-tray")).toContainText(gone.slice(0, 12));
+});
+
+test("delete page: no button on an approved page or for a viewer", async ({ page, request }) => {
+  await open(page);
+  await page.getByTestId("page-tab-2").click();
+  await page.getByTestId("status-btn").click();            // draft -> subbed
+  await page.getByTestId("approve").click();
+  await expect(page.getByTestId("lock-banner")).toContainText("approved");
+  await expect(page.getByTestId("delete-page")).toHaveCount(0); // read-only page: no button at all
+  const v = await page.context().newPage();
+  await v.addInitScript(([cfg]) => { (window as any).__EPAPER_CONFIG__ = cfg; }, [{ apiBase: "http://127.0.0.1:8181", mockUser: "vic", edition: "ed_demo" }]);
+  await v.goto("/");
+  await expect(v.getByTestId("fill-meter")).toContainText(/%/, { timeout: 15000 });
+  await expect(v.getByTestId("delete-page")).toHaveCount(0);
 });
 
 test("versions: restore brings back earlier text", async ({ page }) => {

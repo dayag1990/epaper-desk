@@ -83,7 +83,7 @@ export function editionRoutes(app: App) {
     const p = req.principal!;
     const ed = await prisma.edition.findFirst({ where: { id: req.params.id, paper_id: p.paper_id } });
     if (!ed) throw notFound("That edition");
-    const pages = await prisma.page.findMany({ where: { edition_id: ed.id }, orderBy: { no: "asc" } });
+    const pages = await prisma.page.findMany({ where: { edition_id: ed.id, deleted_at: null }, orderBy: { no: "asc" } });
     return {
       id: ed.id, name: ed.name || `Edition ${day(ed.date)}`, date: day(ed.date), status: ed.status, rev: ed.rev, template_set: ed.template_set,
       pages: await Promise.all(pages.map(pageView)),
@@ -94,7 +94,7 @@ export function editionRoutes(app: App) {
 
   // ---- pages ----
   const loadPage = async (id: string, paper_id: string) => {
-    const page = await prisma.page.findFirst({ where: { id, paper_id } });
+    const page = await prisma.page.findFirst({ where: { id, paper_id, deleted_at: null } });
     if (!page) throw notFound("That page");
     return page;
   };
@@ -190,6 +190,49 @@ export function editionRoutes(app: App) {
     await reindex(p.paper_id, page.id, doc);
     await enqueue("page.fit", p.paper_id, { page_id: page.id, rev }, `fit:${page.id}:${rev}`);
     return { rev, doc };
+  });
+
+  // ---- delete a page: kept as a version, later pages move up one number ----
+  // Nothing is destroyed: the row stays (deleted_at), its versions stay (the last one is "delete"), only the page number is
+  // parked below zero so the number can be used again. Stories that were only on this page go back to "not placed".
+  app.delete("/v1/pages/:id", { schema: { tags: ["pages"], params: Id }, preHandler: requireRole(...WRITE_ROLES) }, async (req) => {
+    const p = req.principal!;
+    const page = await loadPage(req.params.id, p.paper_id);
+    const other = heldByOther(await lockOf(page), p.user_id);
+    if (other) throw lockedErr(other);
+    if (page.status === "approved") throw new ApiError(423, "approved", "This page is approved and locked. Reopen it before you delete it.");
+    const all = await prisma.page.findMany({ where: { edition_id: page.edition_id, deleted_at: null }, orderBy: { no: "asc" } });
+    if (all.length <= 1) throw new ApiError(409, "last_page", "This is the only page of the edition, so it cannot be deleted.");
+    const later = all.filter((x) => x.no > page.no);
+    for (const l of later) {
+      if (l.status === "approved") throw new ApiError(423, "approved", `Page ${l.no} is approved and its page number would change. Reopen page ${l.no} first, then delete this page.`);
+      const o = heldByOther(await lockOf(l), p.user_id);
+      if (o) throw new ApiError(423, "locked", `Page ${l.no} is being edited by ${o.name}, and its page number would change. Try again when they are done.`, { locked_by: o });
+    }
+    const lowest = (await prisma.page.findFirst({ where: { edition_id: page.edition_id }, orderBy: { no: "asc" } }))!.no;
+    const parked = Math.min(0, lowest) - 1;
+    const rev = page.rev + 1;
+    const ddoc = { ...(page.doc as any), rev };
+    const ops: any[] = [
+      prisma.pageVersion.create({ data: { paper_id: p.paper_id, page_id: page.id, rev, doc: ddoc, source: "delete", user_id: p.user_id, fit_pct: page.fit_pct } }),
+      prisma.page.update({ where: { id: page.id }, data: { doc: ddoc, rev, no: parked, deleted_at: new Date(), locked_by: null, lock_expires_at: null } }),
+      prisma.pageArticle.deleteMany({ where: { page_id: page.id } }),
+    ];
+    const moved: { id: string; no: number; rev: number }[] = [];
+    for (const l of later) {
+      const no = l.no - 1, lrev = l.rev + 1;
+      const ldoc = { ...(l.doc as any), page: { ...(l.doc as any).page, no }, rev: lrev };
+      ops.push(
+        prisma.page.update({ where: { id: l.id }, data: { no, doc: ldoc, rev: lrev } }),
+        prisma.pageVersion.create({ data: { paper_id: p.paper_id, page_id: l.id, rev: lrev, doc: ldoc, source: "renumber", user_id: p.user_id, fit_pct: l.fit_pct } }),
+      );
+      moved.push({ id: l.id, no, rev: lrev });
+    }
+    await prisma.$transaction(ops);
+    await audit(p.paper_id, p.user_id, "delete", "page", page.id, { no: page.no, rev: page.rev }, { rev, renumbered: moved.length });
+    // measure the pages whose number changed again, so the fit numbers on the desk are true
+    for (const m of moved) await enqueue("page.fit", p.paper_id, { page_id: m.id, rev: m.rev }, `fit:${m.id}:${m.rev}`);
+    return { deleted: { id: page.id, no: page.no, rev }, pages: moved, kept_as_version: rev };
   });
 
   // ---- lock: holder + expiry, "being edited by ..." ----

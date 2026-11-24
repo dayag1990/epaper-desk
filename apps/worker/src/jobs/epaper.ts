@@ -44,7 +44,7 @@ export async function epaperBuild(e: Envelope, job: JobCtx) {
       if (ex?.snapshot_key) snapshot = LayoutSnapshotSchema.parse(JSON.parse((await driver.get(ex.snapshot_key)).toString("utf8")));
       if (ep.edition_id) {
         itemArticles = {};
-        for (const pg of await prisma.page.findMany({ where: { edition_id: ep.edition_id } }))
+        for (const pg of await prisma.page.findMany({ where: { edition_id: ep.edition_id, deleted_at: null } }))
           for (const it of PageDocSchema.parse(pg.doc).items) if (it.article_id) itemArticles[it.id] = it.article_id;
       }
     }
