@@ -262,6 +262,9 @@ importers:
       playwright:
         specifier: 1.49.1
         version: 1.49.1
+      sharp:
+        specifier: 0.33.5
+        version: 0.33.5
 
   packages/idml:
     dependencies:
