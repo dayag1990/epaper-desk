@@ -76,6 +76,17 @@ export class LayoutEngine {
     });
   }
 
+  /** The masthead name on the page loaded last: its font size and how many lines it takes. */
+  async mastheadBox(): Promise<{ fontPx: number; lines: number }> {
+    return this.page.evaluate(() => {
+      const n = document.querySelector<HTMLElement>(".mast .name");
+      if (!n) return { fontPx: 0, lines: 0 };
+      const cs = getComputedStyle(n);
+      const lh = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.2;
+      return { fontPx: parseFloat(cs.fontSize), lines: Math.round((n.getBoundingClientRect().height - parseFloat(cs.paddingBottom || "0")) / lh) };
+    });
+  }
+
   /** Word-space growth, characters per line and rag of the body text of the page loaded last (see domSpaceStats). */
   async spaceStats(extraCss = ""): Promise<SpaceStat[]> {
     if (extraCss) await this.page.addStyleTag({ content: extraCss });

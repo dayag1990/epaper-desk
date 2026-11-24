@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Article } from "@epaper/core";
-import { LayoutEngine, autoPlan, captionHtml, renderPage, splitCaption } from "../src/index.js";
+import { LayoutEngine, autoPlan, captionHtml, mastNameSize, renderPage, splitCaption } from "../src/index.js";
 import { englishArticles, tpl } from "./helpers.js";
 
 describe("splitCaption: the credit is the small run of the caption line", () => {
@@ -113,5 +113,19 @@ describe("masthead: the paper's own name wins over the template's", () => {
     expect(none.pages[0]!.doc.furniture!.masthead).toBe("The Demo Gazette");
     const blank = await autoPlan(engine, arts, [t], { pages: 1, bySection: false, masthead: "   " });
     expect(blank.pages[0]!.doc.furniture!.masthead).toBe("The Demo Gazette");
+  }, 60000);
+
+  it("a long paper name stays on one line in the red band (it shrinks instead of wrapping), a short one keeps the template size", async () => {
+    const own = await autoPlan(engine, arts, [t], { pages: 1, bySection: false, masthead: "The Riverton Herald" });
+    await engine.load(own.pages[0]!.doc, t, arts);
+    const m = await engine.mastheadBox();
+    expect(m.lines).toBe(1);
+    expect(m.fontPx).toBeLessThanOrEqual(t.masthead_px.name);
+    const long = await autoPlan(engine, arts, [t], { pages: 1, bySection: false, masthead: "The Very Long Named Riverton Valley Herald And Gazette" });
+    await engine.load(long.pages[0]!.doc, t, arts);
+    expect((await engine.mastheadBox()).lines).toBe(1);
+    expect(mastNameSize("தென்பொதிகை", t)).toBe(t.masthead_px.name);
+    expect(mastNameSize("The Demo Gazette", t)).toBe(t.masthead_px.name);
+    expect(mastNameSize("The Riverton Herald", t)).toBeLessThan(t.masthead_px.name);
   }, 60000);
 });

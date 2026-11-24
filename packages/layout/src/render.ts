@@ -102,6 +102,24 @@ function storyHtml(item: PageItem, span: number, articles: readonly Article[], t
 }
 
 /**
+ * The masthead name stays on ONE line: a long paper name ("The Riverton Herald") would otherwise wrap in the red band and push the
+ * page down. Its size shrinks only when the name would not fit next to the tagline (about 0.62 em per character; the band's
+ * room is the canvas minus page padding, band padding, the tagline's minimum width and the gap).
+ */
+export function mastNameSize(name: string, t: Pick<Template, "canvas_px" | "pad" | "masthead_px">): number {
+  const room = t.canvas_px - t.pad.left - t.pad.right - 56 - 120 - 24;
+  const len = [...name].length || 1;
+  return Math.min(t.masthead_px.name, Math.floor(room / (len * 0.62)));
+}
+function mastName(name: string, t: Template, editable: boolean): string {
+  if (!editable && !name) return "";
+  const px = mastNameSize(name, t);
+  const small = px < t.masthead_px.name ? ` style="font-size:${px}px"` : "";
+  const ed = editable ? ` contenteditable="true" spellcheck="false" data-ph="Newspaper name"` : "";
+  return `<div class="name"${small}${ed}>${esc(name)}</div>`;
+}
+
+/**
  * renderPage(pageDoc, template, articles) -> page HTML + CSS.
  * The one renderer: the editor puts `html` in the DOM, the worker loads it in Chromium.
  * Pure string output, no DOM needed, deterministic.
@@ -120,7 +138,7 @@ export function renderPage(doc: PageDoc, template: Template, articles: readonly 
     editable || text ? `<${tag}${cls ? ` class="${cls}"` : ""}${ed}${ph(ph0)}>${esc(text)}</${tag}>` : "";
   const head =
     doc.page.no === 1
-      ? `<div class="mast">${cell("div", "name", f.masthead, "Newspaper name")}${cell("div", "tag", f.tagline, "Tagline / website")}</div>` +
+      ? `<div class="mast">${mastName(f.masthead, t, editable)}${cell("div", "tag", f.tagline, "Tagline / website")}</div>` +
         `<div class="strip">${strip.map((s, i) => cell("span", "", s, ["EDITION · CITY", "DAY, DATE", "PAGES · PRICE"][i]!)).join("")}</div>`
       : `<div class="strip inner">${cell("span", "sec", strip[0]!, "Section name")}${cell("span", "", strip[1]!, "DAY, DATE")}${cell("span", "", strip[2]!, "PAGE")}</div>`;
   const stories = doc.items.map((it, n) => storyHtml(it, spans[n]!, articles, t, editable)).join("");
