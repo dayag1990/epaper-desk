@@ -83,17 +83,28 @@ EOS
     || dfail "The second database could not be started. Nothing was changed on the live database."
 }
 
+# is_live_copy <id>: true when the live database runs on this restored folder (never touch it then)
+is_live_copy() { resolve_state_dir; [ -n "$STATE_DIR" ] && [ "$(cat "$STATE_DIR/pgdata-source" 2>/dev/null || true)" = "$ROOT/restores/$1/pgdata" ]; }
+# discard_copy <id>: a copy that failed to come up may be half-replayed and can never be resumed; it is rebuilt from the backups next
+# time. (Only ever a restored copy; the live database and the old volume are never named here.)
+discard_copy() {
+  is_live_copy "$1" && return 0
+  dk stop -t 20 "${PROJECT}-restore-$1" >/dev/null 2>&1 || true
+  dk_out --user 0 -v "$ROOT:/r" --entrypoint bash "$PG_IMAGE" -c "rm -rf /r/restores/$1" >/dev/null 2>&1 || true
+}
 # wait_copy <id>: until the copy answers and has left recovery; fails in plain words when it stops or never gets there
 wait_copy() {
   local id=$1 cname="${PROJECT}-restore-$1" i r
   for i in $(seq $(( RESTORE_WAIT_S / 3 ))); do
     if [ "$(dk inspect -f '{{.State.Running}}' "$cname" 2>/dev/null || echo false)" != true ]; then
+      discard_copy "$id"
       dfail "The second database stopped while it was being built. The most likely reason: the database log does not reach that minute yet (the newest copy of the log is older). Try a minute that is a little earlier. The live database was not touched."
     fi
     r=$(pg_client 'PGPASSWORD="$POSTGRES_PASSWORD" psql -h postgres-restore-'"$id"' -U epaper -d epaper -X -Atc "select pg_is_in_recovery()"' 2>/dev/null || true)
     [ "$r" = f ] && return 0
     sleep 2
   done
+  discard_copy "$id"
   dfail "The second database did not finish building in $((RESTORE_WAIT_S / 60)) minutes. The live database was not touched."
 }
 
@@ -104,6 +115,7 @@ desk_db_restore() {
   [ "$te" -le "$(date -u +%s)" ] || dfail "That time is in the future. Pick a minute that has already happened. Nothing was changed."
   tt=$(date -u -d "$to" '+%Y-%m-%d %H:%M:%S+00')
   id="r$(date -u -d "$to" +%Y%m%dT%H%M%SZ)"; cname="${PROJECT}-restore-$id"
+  is_live_copy "$id" && dfail "The live database already is the copy for that minute. Nothing was changed."
   if [ "$(dk inspect -f '{{.State.Running}}' "$cname" 2>/dev/null || echo false)" = true ]; then
     dsay "the second database for $to is already running"
   else
@@ -124,6 +136,13 @@ desk_db_restore() {
     | {id: $id, counts: ((($live|keys) + ($rest|keys)) | unique | map({table: ., live: ($live[.] // 0), restored: ($rest[.] // 0)}))}'
 }
 
+# A restored copy starts a new timeline (a history file in its pg_wal). The copy ran with archiving off, so nobody has put that file
+# in the log archive yet; without it a later restore cannot follow the new timeline and would silently stop at the old one.
+archive_histories() {
+  dk_out --user 999:999 -v "$1:/d:ro" -v "$ROOT/walarchive:/walarchive" -v "$REPO_DIR/ops/postgres:/opt/epaper-pg:ro" --entrypoint bash "$PG_IMAGE" -c \
+    'n=0; for f in /d/pg_wal/*.history; do [ -e "$f" ] || continue; /opt/epaper-pg/archive-wal.sh "$f" "$(basename "$f")" || exit 1; n=$((n+1)); done; echo "archived $n history file(s)"' >&2
+}
+
 # ---- database: switch to the copy ------------------------------------------------------
 desk_db_switch() {
   local id=${1:?id} dir cname old
@@ -138,13 +157,18 @@ desk_db_switch() {
   dsay "cleaning the restore settings out of the copy, then stopping it"
   pg_client 'PGPASSWORD="$POSTGRES_PASSWORD" psql -h postgres-restore-'"$id"' -U epaper -d epaper -X -q -c "alter system reset all" -c "select pg_reload_conf()"' >/dev/null 2>&1 || true
   dk stop -t 60 "$cname" >/dev/null 2>&1 || dfail "The restored database would not stop cleanly. Nothing was changed."
+  archive_histories "$dir" || dfail "The new timeline could not be written down in the log archive, so the desk did not switch. Nothing was changed."
   dsay "stopping the live database (the old copy stays on disk untouched)"
   compose stop -t 60 postgres >&2 || dfail "The live database would not stop. Nothing was changed."
   # from here on, any failure puts the old database back before the desk answers
-  back_to_old() { rm -f "$STATE_DIR/pgdata-source" "$STATE_DIR/pgdata-source.tmp"; compose up -d --no-deps postgres >&2 || true; dfail "$1"; }
+  back_to_old() { rm -f "$STATE_DIR/pgdata-source" "$STATE_DIR/pgdata-source.tmp"; unset PGDATA_SOURCE; compose up -d --no-deps postgres >&2 || true; dfail "$1"; }
   printf '%s\n' "$dir" > "$STATE_DIR/pgdata-source.tmp" && mv -f "$STATE_DIR/pgdata-source.tmp" "$STATE_DIR/pgdata-source" || back_to_old "The desk could not write down the switch, so it went back to the old database. Nothing was lost."
   dsay "starting the live database on the restored copy"
   compose up -d --no-deps --wait --wait-timeout 180 postgres >&2 || back_to_old "The database did not start on the restored copy, so the desk went back to the old one. Nothing was lost."
+  # trust, but look: the running database must really sit on the restored folder
+  local cid src; cid=$(compose ps -q postgres 2>/dev/null | head -1)
+  src=$(dk inspect -f '{{range .Mounts}}{{if eq .Destination "/var/lib/postgresql/data"}}{{.Source}}{{end}}{{end}}' "$cid" 2>/dev/null || true)
+  [ "$src" = "$dir" ] || { compose stop -t 60 postgres >&2 || true; back_to_old "The database did not end up on the restored copy, so the desk went back to the old one. Nothing was lost."; }
   jq -n --arg old "$old" '{ok:true, old_copy:$old}'
 }
 
@@ -178,7 +202,7 @@ desk_verify() {
   if [ "$res" = pass ]; then
     ( make_envf && restic_run -- snapshots --latest 1 --host epaper --compact >&2 ) || { res=fail; note="the off-box bucket check failed"; }
   fi
-  local rec; rec=$(jq -cn --arg at "$(now)" --arg r "$res" --arg n "$note" '{at:$at, result:$r, note:$n}')
+  local rec; rec=$(jq -cn --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg r "$res" --arg n "$note" '{at:$at, result:$r, note:$n}')
   dk_out --user 1001:1001 -v "$ROOT:/data" -e "REC=$rec" --entrypoint bash "$PG_IMAGE" -c 'printf "%s\n" "$REC" > /data/drill-status.json.tmp && mv -f /data/drill-status.json.tmp /data/drill-status.json' >/dev/null 2>&1 || true
   # the scratch folder was made by the database user (uid 999); it is empty-able only by that user
   dk_out --user 0 -v "$ROOT:/r" --entrypoint bash "$PG_IMAGE" -c "rm -rf /r/restores/$id" >/dev/null 2>&1 || true

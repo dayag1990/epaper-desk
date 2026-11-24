@@ -52,7 +52,8 @@ else COMPOSE_ARGS=(-f "$REPO_DIR/docker-compose.yml"); fi
 load_pointers() {
   local v; resolve_state_dir; [ -n "$STATE_DIR" ] || return 0
   if [ -z "${EPAPER_RELEASE:-}" ] && [ -s "$STATE_DIR/current" ]; then v=$(tr -d '[:space:]' <"$STATE_DIR/current"); [ -n "$v" ] && export EPAPER_RELEASE=$v; fi
-  if [ -z "${PGDATA_SOURCE:-}" ] && [ -s "$STATE_DIR/pgdata-source" ]; then v=$(tr -d '\n' <"$STATE_DIR/pgdata-source"); [ -n "$v" ] && export PGDATA_SOURCE=$v; fi
+  # the pointer file always wins for the database folder (it changes during a switch); with no file the environment is left alone
+  if [ -s "$STATE_DIR/pgdata-source" ]; then v=$(tr -d '\n' <"$STATE_DIR/pgdata-source"); [ -n "$v" ] && export PGDATA_SOURCE=$v; fi
   return 0
 }
 compose() { load_pointers; BACKUP_ROOT=$ROOT dk compose -p "$PROJECT" "${COMPOSE_ARGS[@]}" "$@"; }

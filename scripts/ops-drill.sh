@@ -91,7 +91,8 @@ cmd_down() {
   ids=$(dk ps -aq --filter "name=^$PROJ-restore-"); [ -n "$ids" ] && dk rm -f $ids >/dev/null 2>&1
   ids=$(dk volume ls -q --filter "label=com.docker.compose.project=$PROJ"); [ -n "$ids" ] && dk volume rm $ids >/dev/null 2>&1
   dk network ls -q --filter "name=^${PROJ}_" | xargs -r docker network rm >/dev/null 2>&1
-  for img in "$API_IMAGE" "$WORKER_IMAGE" "$OPS_IMAGE"; do for v in 2026-11-24.1 2026-11-24.2 drill; do dk image inspect "$img:$v" >/dev/null 2>&1 && dk rmi "$img:$v" >/dev/null 2>&1; done; done
+  dk image inspect drill-ops-backup:e >/dev/null 2>&1 && dk rmi drill-ops-backup:e >/dev/null 2>&1
+  for img in "$API_IMAGE" "$WORKER_IMAGE" "$OPS_IMAGE"; do for v in 2026-11-24.1 2026-11-24.2 drill e; do dk image inspect "$img:$v" >/dev/null 2>&1 && dk rmi "$img:$v" >/dev/null 2>&1; done; done
   if make_envf 2>/dev/null; then
     local sn; sn=$(restic_run -- snapshots --json 2>/dev/null | jq -r '.[].id' | tr '\n' ' ')
     [ -n "$sn" ] && { restic_run -- forget --prune $sn >/dev/null 2>&1 && echo "emptied the epaper-drill prefix in the bucket" || echo "WARNING: could not empty the epaper-drill prefix"; }
@@ -234,6 +235,10 @@ cmd_b2() {
   PGX -c "select to_regclass('drill_rows') is null" | grep -q t && res ok "(b) the live database was not changed by building the copy" || res bad "(b) live database changed"
   local sw; t0=$(now_s); sw=$(tap "/ops/db/restore/$id/switch" '{"confirm":"SWITCH"}'); code=$(echo "$sw" | jfield 'd["status"]'); ms=$(echo "$sw" | jfield 'd["ms"]')
   [ "$code" = 200 ] && res ok "(b) switch: HTTP 200 in $(python3 -c "print(round($ms/1000,1))") s ($(echo "$sw" | jfield 'd["body"]["message"][:120]'))" || { res bad "(b) switch HTTP $code: $(echo "$sw" | jfield 'd["body"]' | cut -c1-400)"; return; }
+  cmd_b3
+}
+cmd_b3() {
+  echo "== (b) part 3: what the live database holds after the switch"
   wait_green postgres api worker 90 >/dev/null || true
   local got; got=$(PGX -c "$SQLTAB drill_rows" 2>&1)
   [ "$got" = "$(cat "$DR/b-expect-rows")" ] && res ok "(b) after the switch every row is back: drill_rows = $(echo "$got" | cut -d: -f1) rows, identical checksum to the moment of the restore point" || res bad "(b) rows differ: got '$got' want '$(cat "$DR/b-expect-rows")'"
@@ -345,7 +350,7 @@ case "${1:-}" in
   converge) compose up -d --no-build >/dev/null 2>&1 && echo converged;;
   g) cmd_g;;
   d) cmd_d;;
-  b1) cmd_b1;; b2) cmd_b2;;
+  b1) cmd_b1;; b2) cmd_b2;; b3) cmd_b3;;
   a) cmd_a;; f) cmd_f;; c) cmd_c;;
   rebuild)  # new desk code: rebuild the image from this checkout and replace only the desk container
     gen_services
