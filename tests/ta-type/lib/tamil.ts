@@ -21,7 +21,8 @@ export async function ingestTamil(): Promise<Article[]> {
   const mapping = { ...RSS_DEFAULT_MAPPING, lang: "const:ta", script: "const:Taml" };
   const rep = await syncSource(createRssConnector(fetcher as never), { url: "http://127.0.0.1:8190/rss.xml", limit: 200 }, mapping, { paperId: "pap_ta", sourceId: "src_ta" }, store);
   if (rep.created !== 40 || rep.rejected.length) throw new Error(`ingest gave ${rep.created} articles, ${rep.rejected.length} rejected`);
-  return store.all();
+  // the feed now carries photos (media:content); these tests are about the text and use their own placeholder photos
+  return store.all().map((a) => ({ ...a, images: [] }));
 }
 
 const PLACEHOLDER = "data:image/svg+xml;base64," + Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="2400" height="1600"><rect width="2400" height="1600" fill="#8a8a8a"/></svg>').toString("base64");
@@ -31,9 +32,9 @@ export function withPlaceholder(arts: readonly Article[], ids: ReadonlySet<strin
 }
 
 /** Plans exactly as the worker does: section order and date format come from the template set. */
-export function planTamil(engine: LayoutEngine, arts: readonly Article[]): Promise<PlanResult> {
+export function planTamil(engine: LayoutEngine, arts: readonly Article[], extra: { targetFill?: number } = {}): Promise<PlanResult> {
   const t = taTemplates();
-  return autoPlan(engine, arts, t, { sectionPages: t[0]!.section_order, date: formatEditionDate(new Date("2026-11-24T00:00:00Z"), t[0]!) });
+  return autoPlan(engine, arts, t, { sectionPages: t[0]!.section_order, date: formatEditionDate(new Date("2026-11-24T00:00:00Z"), t[0]!), ...extra });
 }
 
 // ---------------------------------------------------------------- proof inputs

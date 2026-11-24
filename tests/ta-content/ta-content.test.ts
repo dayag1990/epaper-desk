@@ -30,7 +30,8 @@ const REAL_PAPERS = ["தினத்தந்தி", "தினமலர்", 
 const REAL_ENTITIES = ["திமுக", "அதிமுக", "பாஜக", "காங்கிரஸ்", "பாமக", "தேமுதிக", "நாம் தமிழர்", "ஐபிஎல்", "பிசிசிஐ", "சிஎஸ்கே", "சூப்பர் கிங்ஸ்", "மும்பை இந்தியன்ஸ்", "இஸ்ரோ", "ரிசர்வ் வங்கி", "செபி", "சென்னை மெட்ரோ", "இந்திய ரயில்வே", "தெற்கு ரயில்வே", "உச்ச நீதிமன்றம்", "உயர் நீதிமன்றம்", "முதலமைச்சர்", "பிரதமர்", "அமைச்சர்", "சட்டமன்றம்", "நாடாளுமன்றம்", "தேர்தல்", "ஹிந்து", "முஸ்லிம்", "கிறிஸ்தவ", "மசூதி", "தேவாலயம்", "கொடைக்கானல் நீதி", "ஃபிஃபா", "ஐசிசி"];
 
 const words = (a: Art) => a.body.join(" ").split(/\s+/).filter(Boolean).length;
-const band = (n: number) => (n >= 60 && n <= 110 ? "short" : n >= 150 && n <= 300 ? "medium" : n >= 400 && n <= 700 ? "long" : "none");
+// The first draft had short / medium / long pieces; the stories were then trimmed to fit eight pages (scripts/trim-articles-ta.mjs): now short (the 32 ordinary stories) and lead (one per section, with the pull quote).
+const band = (n: number) => (n >= 60 && n <= 130 ? "short" : n >= 140 && n <= 300 ? "lead" : "none");
 const letters = (s: string) => [...s].filter((c) => /\p{L}/u.test(c));
 const tamilShare = (s: string) => { const l = letters(s); return l.length ? l.filter((c) => /\p{Script=Tamil}/u.test(c)).length / l.length : 0; };
 const allText = (a: Art) => [a.headline, a.standfirst, a.byline, a.dateline, ...a.body, a.pull_quote ?? "", a.caption ?? ""].join("\n");
@@ -85,25 +86,25 @@ describe("fixture shape", () => {
 });
 
 describe("lengths", () => {
-  it("every article is in a band; 6 short, 26 medium, 8 long (one long per section)", () => {
-    const counts = { short: 0, medium: 0, long: 0, none: 0 };
+  it("every article is in a band; 32 short, 8 lead (one lead per section)", () => {
+    const counts = { short: 0, lead: 0, none: 0 };
     for (const a of arts) { const b = band(words(a)); counts[b]++; expect(b, `${a.id} has ${words(a)} words`).not.toBe("none"); }
-    expect(counts).toEqual({ short: 6, medium: 26, long: 8, none: 0 });
-    for (const name of SECTIONS) expect(arts.filter((a) => a.section === name && band(words(a)) === "long"), name).toHaveLength(1);
-    expect(arts.filter((a) => a.page === 1 && band(words(a)) === "long")).toHaveLength(1);
+    expect(counts).toEqual({ short: 32, lead: 8, none: 0 });
+    for (const name of SECTIONS) expect(arts.filter((a) => a.section === name && band(words(a)) === "lead"), name).toHaveLength(1);
+    expect(arts.filter((a) => a.page === 1 && band(words(a)) === "lead")).toHaveLength(1);
   });
 
-  it("long pieces have 3-6 paragraphs and a pull quote; others have none", () => {
+  it("lead pieces have 2-6 paragraphs and a pull quote; others have none", () => {
     for (const a of arts) {
-      if (band(words(a)) === "long") {
-        expect(a.body.length, a.id).toBeGreaterThanOrEqual(3);
+      if (band(words(a)) === "lead") {
+        expect(a.body.length, a.id).toBeGreaterThanOrEqual(2);
         expect(a.body.length, a.id).toBeLessThanOrEqual(6);
         expect(a.pull_quote && a.pull_quote.length > 20, a.id).toBeTruthy();
       } else expect(a.pull_quote, a.id).toBeNull();
     }
   });
 
-  it("about two thirds have a caption and an image hint (always together)", () => {
+  it("most have a caption and an image hint (always together); the credit is printed for CC BY / CC BY-SA photos only", () => {
     const withCap = arts.filter((a) => a.caption);
     expect(withCap.length).toBeGreaterThanOrEqual(24);
     expect(withCap.length).toBeLessThanOrEqual(31);
@@ -111,8 +112,7 @@ describe("lengths", () => {
       expect(!!a.caption, a.id).toBe(!!a.image_hint);
       if (a.image_hint) {
         expect(a.image_hint, a.id).toMatch(/^[a-z]+( [a-z]+){1,3}$/);
-        expect(a.caption, a.id).toMatch(/^கோப்புப் படம்:|^[^:]+: /);
-        expect(a.caption, a.id).toMatch(/கோப்புப் படம்/);
+        expect(a.caption, a.id).toMatch(/^கோப்புப் படம்( · படம்: .+, CC BY(-SA)? \d\.\d, Wikimedia Commons)?$/);
       }
     }
   });

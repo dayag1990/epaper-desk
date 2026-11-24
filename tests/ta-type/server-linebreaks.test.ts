@@ -53,7 +53,7 @@ describe("line breaks: headless render at three zooms vs the PDF", () => {
       expect(z["0.5"]!.map((l) => l.first), `first words, page ${no}`).toEqual(z["1"]!.map((l) => l.first));
       n += z["1"]!.length;
     }
-    expect(n).toBeGreaterThan(2000);
+    expect(n).toBeGreaterThan(1500); // the stories were trimmed to fit eight pages (was 2,706 lines)
   });
 
   it("no line starts with a vowel sign, pulli or other combining mark (never a broken cluster)", () => {
@@ -96,7 +96,7 @@ describe("line breaks: headless render at three zooms vs the PDF", () => {
         }
       }
     }
-    expect(elements).toBeGreaterThan(300);
+    expect(elements).toBeGreaterThan(200); // trimmed stories (was 330 text elements)
   });
 
   it("pdffonts lists Noto Serif Tamil and Anek Tamil, all embedded", () => {
