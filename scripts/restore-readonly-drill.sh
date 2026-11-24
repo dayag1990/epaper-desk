@@ -37,7 +37,8 @@ err="$W/restic.err"
 snaps=$(restic_run -- snapshots --no-lock --host epaper --tag auto --latest 1 --json 2>"$err"); rc=$?
 if [ $rc -ne 0 ] || [ "$(jq 'length' <<<"$snaps" 2>/dev/null || echo 0)" -lt 1 ]; then
   echo "FAIL: the bucket could not be read. Exact answer from restic:"; echo "$snaps" | tail -5; cat "$err" 2>/dev/null | tail -5
-  echo "(Backblaze's own reason, read once:)"; b2_refusal 2>/dev/null || true
+  echo "(Backblaze's own answer to a plain login, read once:)"
+  curl -s -m 20 -u "${BACKUP_S3_KEY:-}:${BACKUP_S3_SECRET:-}" https://api.backblazeb2.com/b2api/v3/b2_authorize_account 2>/dev/null | jq -r 'if .apiInfo then "login ok: the key works" else "\(.status) \(.code): \(.message)" end' 2>/dev/null || echo "(no answer)"
   exit 3
 fi
 sid=$(jq -r '.[-1].short_id' <<<"$snaps"); stime=$(jq -r '.[-1].time' <<<"$snaps")
