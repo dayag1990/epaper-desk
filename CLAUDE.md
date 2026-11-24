@@ -220,7 +220,7 @@ These need the client or come later. Do not fake them:
   - Tests and drills use throwaway projects only, named `tmp-*`, `test-*` or `drill-*`, and clean up only what they created.
   - `scripts/guard/docker` enforces this: it is installed first on PATH as `docker` (`scripts/guard/install.sh`), it fails closed, and its 68 checks are in `tests/docker-guard.test.ts`. Claude Code settings also deny any command containing a Docker prune. Never bypass either (no `/usr/bin/docker`, no raw socket calls).
   - Every sub-agent brief that touches Docker must repeat this rule.
-  - The ops desk's socket proxy must keep `VOLUMES=0` and `SYSTEM=0`, so those routes do not exist. A deploy (`compose up -d --build`) is allowed; it replaces changed containers and never deletes volumes.
+  - The ops desk's socket proxy runs with `VOLUMES=1` (owner decision 2026-11-24, measured in the M13 drill: with 0 the proxy answers 403 to the volume lookups every `docker compose up` makes, so "Bring everything up", creating a missing container and every rollback fail). Prune and volume deletes are stopped one step in front by `ops/dockerguard` (21 checks in `tests/ops-dockerguard.test.ts`; the proxy has no published port). Keep `SYSTEM=0`, and never lower the filter. A deploy (`compose up -d --build`) is allowed; it replaces changed containers and never deletes volumes.
   - Removing a live container or volume is done only by the owner, or by the ops desk behind its typed confirmation and snapshot.
 - Never make the ops desk reachable without login + TOTP.
 - Never touch the off-box backups except through M13's own tools.
