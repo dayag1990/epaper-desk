@@ -61,6 +61,8 @@ beforeAll(async () => {
   mkdirSync(join(site, "img"), { recursive: true });
   const jpg = await sharp({ create: { width: 1800, height: 1200, channels: 3, background: "#6a7f8a" } }).jpeg().toBuffer();
   let rss = readFileSync(join(site, "rss.xml"), "utf8");
+  // the live feed now carries a photo (and credit) for most stories; this throwaway site has no photo files, so the test puts its own lead photos in
+  rss = rss.replace(/<media:content\b(?:[^>]*\/>|[^>]*>[\s\S]*?<\/media:content>)/g, "");
   for (const s of SECTIONS) {
     const lead = fix.articles.filter((a) => a.section === s).sort((a, b) => +new Date(b.published_at) - +new Date(a.published_at) || (a.id < b.id ? -1 : 1))[0]!;
     leadIds.push(lead.id);
@@ -154,7 +156,11 @@ describe("Tamil demo on the real stack (project tmp-ta)", () => {
     expect(fonts.some((f) => /NotoSerifTamil/.test(f.name)) && fonts.some((f) => /AnekTamil/.test(f.name))).toBe(true);
     const text = squash(pdfWords(dl.buf).map((w) => w.text).join(""));
     let n = 0;
-    for (const p of pages) for (const it of p.doc.items) { expect(text, `headline ${it.text.head}`).toContain(squash(it.text.head)); n++; }
+    for (const p of pages) for (const it of p.doc.items) {
+      // every word of the headline is in the text layer (a headline that wraps over lines can be read in columns, so its words need not touch)
+      for (const w of String(it.text.head).split(/\s+/).filter(Boolean)) expect(text, `headline ${it.text.head}: ${w}`).toContain(squash(w));
+      n++;
+    }
     expect(n).toBe(40);
   }, 300_000);
 
