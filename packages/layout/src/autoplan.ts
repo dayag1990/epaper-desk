@@ -23,6 +23,8 @@ export interface AutoPlanOptions {
    */
   sectionPages?: string[];
   date?: string; // printed in the strip; no clock is read, so plans are repeatable
+  /** The paper's own name, printed as the masthead of page 1 instead of the template's demo name (the template text stays the fallback). */
+  masthead?: string;
   ads?: AdBooking[];
   fit?: FitOptions;
   /** Cap the number of full re-fit passes (safety). */
@@ -143,7 +145,7 @@ function buildDoc(pageNo: number, t: Template, items: PageItem[], opts: AutoPlan
     pageNo === 1 ? [t.furniture.strip[0], opts.date ?? t.furniture.strip[1], t.furniture.strip[2]] : [section, opts.date ?? t.furniture.strip[1], `${t.furniture.page_label ?? "PAGE"} ${pageNo}`];
   const doc = {
     page: { no: pageNo, size: t.size.id, w_mm: t.size.w_mm, h_mm: t.size.h_mm, template: t.id, body_pt: round(t.body.start_px * (t.size.w_mm / t.canvas_px / 25.4 * 72), 3) },
-    furniture: { masthead: t.furniture.masthead, tagline: t.furniture.tagline, strip },
+    furniture: { masthead: opts.masthead?.trim() || t.furniture.masthead, tagline: t.furniture.tagline, strip },
     items: finishItems(items, t),
     status: "draft",
     rev: 1,
