@@ -1,0 +1,72 @@
+# THROWAWAY drill stack for the ops desk (scripts/ops-drill.sh). Merged on top of docker-compose.yml + docker-compose.ops.yml:
+#   docker compose -p drill-ops -f docker-compose.yml -f docker-compose.ops.yml -f ops/drill/docker-compose.drill.yml ...
+# Every container is renamed drill-ops-*, every published port moves to 127.0.0.1:181xx, and every folder is under $DRILL_ROOT.
+# It shares NOTHING with the live `epaper` project: not the database volume, not /srv/epaper/files, not a port, not a name.
+# Variables come from the environment (scripts/ops-drill.sh sets them): DRILL_ROOT, REPO.
+services:
+  postgres:
+    container_name: drill-ops-postgres
+  backup:
+    container_name: drill-ops-backup
+    image: epaper/backup:dev
+    # a local restic repository stands in for the bucket (the real bucket key is refused on the drill prefix)
+    environment:
+      RESTIC_REPOSITORY: /repo
+      RESTIC_PASSWORD: ${BACKUP_PASSWORD}
+    volumes:
+      - ${BACKUP_ROOT}:/data
+      - ${EPAPER_ENV:-/srv/epaper/.env}:/run/epaper.env:ro
+      - ${DRILL_ROOT}/bucket:/repo
+  api:
+    container_name: drill-ops-api
+    ports: !override ["127.0.0.1:18100:8100"]
+    volumes: ["${DRILL_ROOT}/root/files:/files"]
+  worker:
+    container_name: drill-ops-worker
+    volumes: ["${DRILL_ROOT}/root/files:/files"]
+  caddy:
+    container_name: drill-ops-caddy
+    ports: !override ["127.0.0.1:18102:8102"]
+    volumes:
+      - ./caddy:/etc/caddy:ro
+      - ${DRILL_ROOT}/reader:/srv/reader:ro
+      - ${DRILL_ROOT}/caddy:/caddy
+  dockerproxy:
+    container_name: drill-ops-dockerproxy
+  dockerguard:
+    container_name: drill-ops-dockerguard
+  ops:
+    container_name: drill-ops-ops
+    ports: !override ["127.0.0.1:18101:8101"]
+    environment:
+      OPS_CONFIG_DIR: ${REPO}/ops
+      OPS_SERVICES_FILE: ${DRILL_ROOT}/cfg/services.yml
+      OPS_SCRIPTS_DIR: ${REPO}/scripts
+      OPS_STATUS_MD: ${REPO}/STATUS.md
+      OPS_COMPOSE_FILES: ${REPO}/docker-compose.yml:${REPO}/docker-compose.ops.yml:${REPO}/ops/drill/docker-compose.drill.yml
+      OPS_COMPOSE_PROJECT: drill-ops
+      OPS_RELEASE_REPOS: ${API_IMAGE},${WORKER_IMAGE}
+      API_IMAGE: ${API_IMAGE}
+      WORKER_IMAGE: ${WORKER_IMAGE}
+      OPS_IMAGE: ${OPS_IMAGE}
+      COMPOSE_PROJECT: drill-ops
+      FILES_ROOT: ${DRILL_ROOT}/root/files
+      BACKUP_ROOT: ${DRILL_ROOT}/root
+      BACKUP_PREFIX: epaper-drill
+      BACKUP_REPO_LOCAL: ${DRILL_ROOT}/bucket
+      BACKUP_PASSWORD: ${BACKUP_PASSWORD}
+      PG_CONTAINER: drill-ops-postgres
+      BK_CONTAINER: drill-ops-backup
+      DRILL_ROOT: ${DRILL_ROOT}
+      REPO: ${REPO}
+      OPS_INSECURE_COOKIE: "1"
+      OPS_SETUP_CODE: drill-setup-code-0001
+      OPS_HEALTH_WAIT_MS: "100000"
+    volumes: !override
+      - /proc:/host/proc:ro
+      - ${REPO}:${REPO}:ro
+      - /srv/epaper/.env:/srv/epaper/.env:ro
+      - ${DRILL_ROOT}/cfg:${DRILL_ROOT}/cfg:ro
+      - ${DRILL_ROOT}/bucket:${DRILL_ROOT}/bucket
+      - ${DRILL_ROOT}/root:${DRILL_ROOT}/root:ro
+      - ${DRILL_ROOT}/root/files:${DRILL_ROOT}/root/files

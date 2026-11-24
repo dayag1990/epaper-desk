@@ -32,6 +32,9 @@ services:
       IMAGES: "1"
       BUILD: "1"
       NETWORKS: "1"
+      # VOLUMES must stay "1": with "0" the proxy answers 403 to the volume lookups that `docker compose up` makes, so "Bring
+      # everything up", a missing container and every rollback fail (measured in the ops drill, 2026-11-24). Prune and volume
+      # deletes are cut one step in front by ops/dockerguard (tests/ops-dockerguard.test.ts). DECISION NEEDED in STATUS.md.
       VOLUMES: "1"
       INFO: "1"
       VERSION: "1"
@@ -94,7 +97,7 @@ services:
 
   ops:
     build: { context: ., dockerfile: apps/ops/Dockerfile }
-    image: epaper/ops:${EPAPER_RELEASE:-dev}
+    image: ${OPS_IMAGE:-epaper/ops}:${EPAPER_RELEASE:-dev}
     depends_on: { dockerguard: { condition: service_healthy } }
     environment:
       DOCKER_HOST: http://dockerguard:2375
@@ -106,6 +109,11 @@ services:
       OPS_COMPOSE_FILES: /srv/epaper/desk/docker-compose.yml:/srv/epaper/desk/docker-compose.ops.yml
       FILES_ROOT: /srv/epaper/files
       OPS_API_BASE: http://api:8100
+      # the backup and restore programs (scripts/backup-now.sh, restore.sh) run inside the desk and talk to Docker through the filter
+      COMPOSE_PROJECT: epaper
+      BACKUP_ROOT: /srv/epaper
+      EPAPER_ENV: /srv/epaper/.env
+      BK_USE_RUN: "1"
       TZ: Asia/Kolkata
     # published ONLY on loopback; Caddy `ops.` reaches it over the compose network
     ports: !override ["127.0.0.1:8101:8101"]
@@ -114,6 +122,7 @@ services:
       - /proc:/host/proc:ro                                   # disk and memory, read-only
       - /srv/epaper/desk:/srv/epaper/desk:ro                  # compose files, ops/*.yml, STATUS.md, scripts/ (backup-now.sh, restore.sh)
       - /srv/epaper/.env:/srv/epaper/.env:ro                  # so `compose up` reads the same settings
+      - /srv/epaper:/srv/epaper:ro                            # read-only view of the backup status files (backup-status.json, drill-status.json)
       - /srv/epaper/files:/srv/epaper/files                   # its own state (_ops/), alerts.log, and safe-to-clear copies
     # A runaway render must never starve the desk: reserved share, guaranteed memory, last to be killed.
     cpus: 0.5
@@ -127,9 +136,9 @@ services:
 
   # releases: the same image names, tagged by release
   api:
-    image: epaper/api:${EPAPER_RELEASE:-dev}
+    image: ${API_IMAGE:-epaper/api}:${EPAPER_RELEASE:-dev}
   worker:
-    image: epaper/worker:${EPAPER_RELEASE:-dev}
+    image: ${WORKER_IMAGE:-epaper/worker}:${EPAPER_RELEASE:-dev}
 
 networks:
   opsdocker:   # desk <-> dockerguard only

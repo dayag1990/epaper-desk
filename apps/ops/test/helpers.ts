@@ -29,7 +29,7 @@ export function mkCfg(over: Record<string, string> = {}): { cfg: Config; root: s
   return { cfg, root };
 }
 
-export const SERVICES = ["api", "worker", "postgres", "ops", "caddy"];
+export const SERVICES = ["api", "worker", "postgres", "ops", "caddy", "backup"];
 
 export function mkStack(opts: { cfgOver?: Record<string, string>; telegram?: AlertChannel | null } = {}) {
   const { cfg, root } = mkCfg(opts.cfgOver);

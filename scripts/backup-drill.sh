@@ -6,9 +6,14 @@
 #   (d) scripts/restore.sh using only the bucket          (e) count rows: seconds of writes lost, restore time
 #   (f) files byte-identical                              (g) clean up everything, empty the drill prefix
 # Env: DRILL_WRITE_SECONDS (90), EPAPER_ENV (/srv/epaper/.env: where the bucket values come from).
+#      BACKUP_REPO_LOCAL=<empty folder>  use a local restic repository instead of the bucket (needs BACKUP_PASSWORD too); the real
+#      bucket key may be refused on the drill prefix. Everything else (kill, delete, restore from the repository only) is the same.
 set -uo pipefail
 . "$(dirname "$0")/lib/backup-common.sh"
 export COMPOSE_PROJECT=epaper-bk PROJECT=epaper-bk
+if [ -n "${BACKUP_REPO_LOCAL:-}" ]; then   # the compose files are read when the helpers load, so set them first
+  export OPS_COMPOSE_FILES="$REPO_DIR/docker-compose.yml:$REPO_DIR/ops/drill/docker-compose.restore-drill.yml"; COMPOSE_ARGS=(-f "$REPO_DIR/docker-compose.yml" -f "$REPO_DIR/ops/drill/docker-compose.restore-drill.yml")
+fi
 [ "$PROJECT" = epaper ] && { echo "refusing to run on the live project" >&2; exit 2; }
 W=$(mktemp -d /tmp/epaper-drill.XXXXXX); ROOT="$W/root"
 export BACKUP_ROOT="$ROOT" BACKUP_PREFIX=epaper-drill PG_CONTAINER=epaper-bk-postgres BK_CONTAINER=epaper-bk-backup

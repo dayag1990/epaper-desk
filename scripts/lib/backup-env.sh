@@ -10,6 +10,13 @@ get() {
   if [ -z "$v" ] && [ -r "$SRC" ]; then v=$(grep -E "^$1=" "$SRC" | head -1 | cut -d= -f2- || true); fi
   printf '%s' "$v"
 }
+# Drills only: BACKUP_REPO_LOCAL=<folder> uses a local restic repository instead of the bucket (the real bucket key may not
+# write a drill prefix). The folder is mounted at /repo wherever restic runs. Never set on the live box.
+if [ -n "${BACKUP_REPO_LOCAL:-}" ]; then
+  [ -n "$(get BACKUP_PASSWORD)" ] || { echo "Backup is not set up: BACKUP_PASSWORD is empty." >&2; exit 2; }
+  umask 077; F=$(mktemp "${TMPDIR:-/tmp}/epaper-backup-env.XXXXXX"); chmod 600 "$F"
+  printf 'RESTIC_REPOSITORY=/repo\nRESTIC_PASSWORD=%s\n' "$(get BACKUP_PASSWORD)" > "$F"; echo "$F"; exit 0
+fi
 for k in BACKUP_S3_ENDPOINT BACKUP_S3_BUCKET BACKUP_S3_KEY BACKUP_S3_SECRET BACKUP_PASSWORD; do
   [ -n "$(get $k)" ] || { echo "Backup is not set up: $k is empty (.env or environment)." >&2; exit 2; }
 done

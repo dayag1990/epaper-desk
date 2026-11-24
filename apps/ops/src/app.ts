@@ -34,7 +34,7 @@ export function buildApp(d: AppDeps) {
   const now = d.now ?? Date.now;
   const auth = new Auth(cfg.stateDir, now);
   const log = new OpsLog(cfg.stateDir);
-  const releases = new Releases(cfg.stateDir, d.docker, cfg.keepReleases);
+  const releases = new Releases(cfg.stateDir, d.docker, cfg.keepReleases, cfg.releaseRepos);
   const services = () => loadServices(cfg.servicesFile);
   const health = new Health({ docker: d.docker, backup: d.backup, api: d.api, services, procDir: cfg.procDir, filesDir: cfg.filesDir, stateDir: cfg.stateDir, opsHost: cfg.opsHost, probe: d.probe, now, certProbe: d.certProbe });
   const fixes = new Fixes({ cfg, docker: d.docker, backup: d.backup, api: d.api, health, releases, log, services, pollMs: d.pollMs, defer: (fn) => void setTimeout(fn, 800) });

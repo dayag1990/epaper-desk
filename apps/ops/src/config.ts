@@ -27,6 +27,8 @@ export interface Config {
   secureCookie: boolean;
   clearDirNames: string[];
   keepReleases: number;
+  /** image names that carry the release tag (a release is usable only when all of them have it) */
+  releaseRepos: string[];
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -57,5 +59,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     secureCookie: env.OPS_INSECURE_COOKIE !== "1",
     clearDirNames: (env.OPS_CLEAR_DIRS ?? "derived,derivatives,exports,cache,tmp").split(",").map((s) => s.trim()).filter(Boolean),
     keepReleases: 5,
+    releaseRepos: (env.OPS_RELEASE_REPOS ?? "epaper/api,epaper/worker").split(",").map((x) => x.trim()).filter(Boolean),
   };
 }

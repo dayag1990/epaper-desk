@@ -18,6 +18,9 @@ FROM docker:27.3.1-cli AS dockercli
 
 FROM node:22.12.0-slim AS run
 ENV NODE_ENV=production
+# jq: the backup and restore programs (scripts/*.sh) the desk runs read JSON
+RUN apt-get update && apt-get install -y --no-install-recommends jq ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 COPY --from=dockercli /usr/local/bin/docker /usr/local/bin/docker
 COPY --from=dockercli /usr/local/libexec/docker/cli-plugins/docker-compose /usr/local/lib/docker/cli-plugins/docker-compose
 COPY --from=build --chown=1001:1001 /app /app

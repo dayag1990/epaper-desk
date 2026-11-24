@@ -20,7 +20,7 @@ export interface DockerDriver {
   restart(container: string, stopTimeoutS?: number): Promise<void>;
   start(container: string): Promise<void>;
   logs(container: string, tail: number): Promise<string>;
-  /** compose up -d (no build). `env` carries EPAPER_RELEASE. */
+  /** compose up -d --no-build --no-deps: only the named services (never the desk, its Docker filter or the proxy). `env` carries EPAPER_RELEASE and PGDATA_SOURCE. */
   up(opts: { services?: string[]; env: Record<string, string> }): Promise<void>;
   /** image tags like "epaper/api:2026-11-21.3" */
   imageTags(): Promise<string[]>;
@@ -111,7 +111,7 @@ export class SocketProxyDocker implements DockerDriver {
     return demux(Buffer.from(await r.arrayBuffer()));
   }
   async up(opts: { services?: string[]; env: Record<string, string> }): Promise<void> {
-    const args = ["compose", "-p", this.o.project, ...this.o.composeFiles.flatMap((f) => ["-f", f]), "up", "-d", "--no-build", ...(opts.services ?? [])];
+    const args = ["compose", "-p", this.o.project, ...this.o.composeFiles.flatMap((f) => ["-f", f]), "up", "-d", "--no-build", "--no-deps", ...(opts.services ?? [])];
     try {
       await (this.o.exec ?? realExec)("docker", args, { ...opts.env, DOCKER_HOST: this.o.host.replace(/^http/, "tcp") });
     } catch (e) {

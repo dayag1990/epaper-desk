@@ -5,6 +5,10 @@
 #
 #   scripts/restore.sh [--to 'YYYY-MM-DD HH:MM:SS+00'] [--force] [--host-setup [--dry-run]]
 #                      [--root DIR] [--project NAME] [--services "postgres backup"]
+#   The ops desk calls three smaller jobs (each prints one JSON object):
+#   scripts/restore.sh db --to <ISO time>               a second database as it was at that minute, beside the live one
+#   scripts/restore.sh db-switch <id>                   make that second database the live one (the old one is kept)
+#   scripts/restore.sh files --scope file|edition|all --at <ISO time>   bring back missing files (never overwrites)
 #
 # Steps: (host setup) -> restic restore of files + WAL archive + base backups + config
 #        -> Postgres restored from the newest verified base backup, WAL replayed to the end (or --to)
@@ -14,6 +18,18 @@
 set -euo pipefail
 . "$(dirname "$0")/lib/backup-common.sh"
 trap tmp_cleanup EXIT
+case "${1:-}" in
+  db|db-switch|files)
+    . "$(dirname "$0")/lib/desk-ops.sh"
+    sub=$1; shift; a_to=""; a_scope=all; a_at=""; a_id=""
+    while [ $# -gt 0 ]; do case "$1" in
+      --to) a_to=$2; shift 2;; --scope) a_scope=$2; shift 2;; --at) a_at=$2; shift 2;; --root) ROOT=$2; shift 2;; --project) PROJECT=$2; shift 2;;
+      *) a_id=$1; shift;; esac; done
+    case "$sub" in
+      db) desk_db_restore "$a_to";; db-switch) desk_db_switch "$a_id";; files) desk_files_restore "$a_scope" "$a_at";;
+    esac
+    exit $?;;
+esac
 TO=""; FORCE=0; HOSTSETUP=0; DRY=0; SERVICES=""
 while [ $# -gt 0 ]; do case "$1" in
   --to) TO=$2; shift 2;; --force) FORCE=1; shift;; --host-setup) HOSTSETUP=1; shift;; --dry-run) DRY=1; shift;;
@@ -142,6 +158,15 @@ say "database is up and out of recovery"
 
 # ---------------------------------------------------------------- 5. stack up, healthy, smoke
 [ -n "$SERVICES" ] || SERVICES=$(compose config --services | tr '\n' ' ')
+# The reader site is served from apps/reader/dist, which git does not carry. Build it once on a fresh box (not fatal: the
+# editor, admin and API do not need it, and the desk says so if the reader row stays red).
+case " $SERVICES " in *" caddy "*)
+  if [ ! -s "$REPO_DIR/apps/reader/dist/index.html" ]; then
+    say "building the reader site (apps/reader/dist is not in git)"
+    dk run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -e CI=true -v "$REPO_DIR:/app" -w /app node:22.12.0-slim bash -c \
+      'mkdir -p /tmp/bin && corepack enable --install-directory /tmp/bin && export PATH=/tmp/bin:$PATH && corepack prepare pnpm@9.15.4 --activate >/dev/null && pnpm install --frozen-lockfile --filter "@epaper/reader..." >/dev/null && pnpm --filter @epaper/reader build >/dev/null' \
+      || say "note: the reader site could not be built here; build it with: pnpm --filter @epaper/reader build"
+  fi;; esac
 say "starting: $SERVICES"
 compose up -d --build $SERVICES >/dev/null || die "could not start the stack" 7
 bad=1

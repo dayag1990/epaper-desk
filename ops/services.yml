@@ -35,6 +35,13 @@
   ready: http://caddy:8102/healthz
   needs: [proxy]
   fixes: [logs]
+- name: backup-service
+  title: The backup program
+  container: epaper-backup
+  ready: container_health
+  needs: [postgres]
+  todo: 'Press "Fix it". While it is stopped, nothing new is copied off the box.'
+  fixes: [restart, logs, run_now]
 - name: backups
   title: Backups (all three kinds exist)
   ready: backup_sets_missing == 0

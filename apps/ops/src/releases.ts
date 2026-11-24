@@ -4,7 +4,7 @@ import type { DockerDriver } from "./docker.js";
 
 /** Release tags look like 2026-11-21.3 */
 export const RELEASE_RE = /^\d{4}-\d{2}-\d{2}\.\d+$/;
-/** Images that carry the release tag. A release is usable only when all of them exist. */
+/** Default images that carry the release tag. A release is usable only when all of them exist. */
 export const RELEASE_REPOS = ["epaper/api", "epaper/worker"];
 
 export function sortReleases(tags: string[]): string[] {
@@ -16,7 +16,15 @@ export function sortReleases(tags: string[]): string[] {
 
 export class Releases {
   private ptr: string;
-  constructor(stateDir: string, private docker: DockerDriver, private keep = 5) { this.ptr = path.join(stateDir, "current"); }
+  private dbPtr: string;
+  constructor(stateDir: string, private docker: DockerDriver, private keep = 5, private repos: string[] = RELEASE_REPOS) { this.ptr = path.join(stateDir, "current"); this.dbPtr = path.join(stateDir, "pgdata-source"); }
+  /**
+   * Where the live database folder is, after a restore-and-switch (an absolute folder). Null = the original named volume.
+   * Every `compose up` must carry it, or compose would put the database back on the old volume.
+   */
+  dbSource(): string | null {
+    try { const t = fs.readFileSync(this.dbPtr, "utf8").trim(); return t.startsWith("/") ? t : null; } catch { return null; }
+  }
   /** The `current` pointer file: which release compose runs. Empty = the `dev` build. */
   current(): string | null {
     try { const t = fs.readFileSync(this.ptr, "utf8").trim(); return RELEASE_RE.test(t) ? t : null; } catch { return null; }
@@ -30,7 +38,7 @@ export class Releases {
   /** Newest first, at most `keep`, only tags that exist for every release image. */
   async list(): Promise<string[]> {
     const tags = await this.docker.imageTags();
-    const per = RELEASE_REPOS.map((repo) => new Set(tags.filter((t) => t.startsWith(repo + ":")).map((t) => t.slice(repo.length + 1)).filter((t) => RELEASE_RE.test(t))));
+    const per = this.repos.map((repo) => new Set(tags.filter((t) => t.startsWith(repo + ":")).map((t) => t.slice(repo.length + 1)).filter((t) => RELEASE_RE.test(t))));
     const all = [...per[0]!].filter((t) => per.every((s) => s.has(t)));
     return sortReleases(all).slice(0, this.keep);
   }

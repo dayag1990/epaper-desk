@@ -34,7 +34,8 @@ services:
       - -c
       - hba_file=/opt/epaper-pg/pg_hba.conf
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      # PGDATA_SOURCE is set only after the ops desk switched to a restored copy (an absolute folder); default = the named volume
+      - ${PGDATA_SOURCE:-pgdata}:/var/lib/postgresql/data
       - ${BACKUP_ROOT:-/srv/epaper}/walarchive:/walarchive
       - ./ops/postgres:/opt/epaper-pg:ro
     # no published port: only the compose network reaches it

@@ -45,7 +45,7 @@ describe("SocketProxyDocker (the real driver, against a fake socket proxy)", () 
     expect(await d.imageTags()).toEqual(["epaper/api:2026-11-21.1", "x/y:z"]);
     expect((await d.pruneBuildCache()).freedBytes).toBe(1234);
     await d.up({ services: ["api"], env: { EPAPER_RELEASE: "2026-11-21.1" } });
-    expect(execs[0]!.args).toEqual(["compose", "-p", "epaper", "-f", "/a.yml", "-f", "/b.yml", "up", "-d", "--no-build", "api"]);
+    expect(execs[0]!.args).toEqual(["compose", "-p", "epaper", "-f", "/a.yml", "-f", "/b.yml", "up", "-d", "--no-build", "--no-deps", "api"]);
     expect(execs[0]!.env.EPAPER_RELEASE).toBe("2026-11-21.1");
     expect(execs[0]!.env.DOCKER_HOST).toBe(base.replace("http", "tcp"));
   });

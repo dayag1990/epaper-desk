@@ -1,0 +1,13 @@
+# Used only by scripts/backup-drill.sh when BACKUP_REPO_LOCAL is set (a local restic repository stands in for the off-box
+# bucket, because the real bucket key is refused on the drill prefix). Merged after docker-compose.yml, project epaper-bk.
+# The backup image gets its own throwaway name, so a rebuild can never move the live image tag.
+services:
+  backup:
+    image: drill-ops-backup:e
+    environment:
+      RESTIC_REPOSITORY: /repo
+      RESTIC_PASSWORD: ${BACKUP_PASSWORD}
+    volumes:
+      - ${BACKUP_ROOT}:/data
+      - ${EPAPER_ENV:-/srv/epaper/.env}:/run/epaper.env:ro
+      - ${BACKUP_REPO_LOCAL}:/repo

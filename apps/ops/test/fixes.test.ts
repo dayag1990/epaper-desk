@@ -23,6 +23,15 @@ describe("restart buttons are safe to press twice", () => {
     expect(b.statusCode).toBe(200);
     expect(JSON.parse(states(s)).map((x: string[]) => x.slice(0, 3))).toEqual(JSON.parse(after1).map((x: string[]) => x.slice(0, 3)));
   });
+  it("bring everything up names compose services (not container names), also for containers that do not exist yet", async () => {
+    const { s, cookie } = await ready();
+    s.docker.containers.clear();
+    const orig = s.docker.up.bind(s.docker);
+    s.docker.up = async (o) => { await orig(o); for (const n of o.services ?? []) s.docker.add(n); };
+    const r = await post(s, cookie, "/ops/up");
+    expect(r.statusCode).toBe(200);
+    expect(s.docker.upCalls.map((u) => u.services!.join(","))).toEqual(["postgres", "api", "worker", "caddy", "backup"]);
+  });
   it("two presses at the same moment run one restart", async () => {
     const { s, cookie } = await ready();
     const orig = s.docker.restart.bind(s.docker);
@@ -53,9 +62,9 @@ describe("restart buttons are safe to press twice", () => {
   it("restart all goes in order (database first) and waits; twice is the same", async () => {
     const { s, cookie } = await ready();
     const a = await post(s, cookie, "/ops/restart-all");
-    expect(a.json().order).toEqual(["postgres", "api", "worker", "proxy"]);
+    expect(a.json().order).toEqual(["postgres", "api", "worker", "proxy", "backup-service"]);
     const order = s.docker.calls.filter((c) => c.startsWith("restart")).map((c) => c.replace("restart epaper-", ""));
-    expect(order).toEqual(["postgres", "api", "worker", "caddy"]);
+    expect(order).toEqual(["postgres", "api", "worker", "caddy", "backup"]);
     const b = await post(s, cookie, "/ops/restart-all");
     expect(b.statusCode).toBe(200);
     expect(b.json().order).toEqual(a.json().order);
@@ -219,13 +228,34 @@ describe("backups, restore and the ops log", () => {
     const id = a.json().id as string;
     const again = await post(s, cookie, "/ops/db/restore", { to, confirm: "RESTORE" });
     expect(again.json().id).toBe(id);
-    expect(s.backup.calls.filter((c) => c.startsWith("restoreDb")).length).toBe(1);
+    expect(s.backup.calls.filter((c) => c.startsWith("snapshot")).length).toBe(1); // no second safety copy, no second build
+    expect(again.json().counts[0]).toEqual({ table: "articles", live: 120, restored: 118 });
     expect((await post(s, cookie, `/ops/db/restore/${id}/switch`, {})).statusCode).toBe(400);
     expect((await post(s, cookie, `/ops/db/restore/${id}/switch`, { confirm: "SWITCH" })).statusCode).toBe(200);
     expect((await post(s, cookie, `/ops/db/restore/${id}/switch`, { confirm: "SWITCH" })).json().already).toBe(true);
     expect(s.backup.calls.filter((c) => c.startsWith("switch")).length).toBe(1);
     expect((await post(s, cookie, "/ops/db/restore/nope/switch", { confirm: "SWITCH" })).statusCode).toBe(404);
     expect((await post(s, cookie, "/ops/db/restore", { to: "yesterday", confirm: "RESTORE" })).statusCode).toBe(400);
+  });
+  it("after a switch the api and worker are restarted, and every later `up` keeps the database on the restored folder", async () => {
+    const { s, cookie } = await ready();
+    const to = "2026-11-21T01:58:00+05:30";
+    const id = (await post(s, cookie, "/ops/db/restore", { to, confirm: "RESTORE" })).json().id as string;
+    s.docker.calls.length = 0;
+    // the switch program writes this pointer file; the desk must carry it on every compose call from then on
+    fs.mkdirSync(s.cfg.stateDir, { recursive: true });
+    fs.writeFileSync(path.join(s.cfg.stateDir, "pgdata-source"), "/srv/epaper/restores/r1/pgdata\n");
+    const r = await post(s, cookie, `/ops/db/restore/${id}/switch`, { confirm: "SWITCH" });
+    expect(r.statusCode).toBe(200);
+    expect(r.json().message).toMatch(/restarted and are healthy/);
+    expect(s.docker.calls.filter((c) => c.startsWith("restart epaper-")).length).toBeGreaterThanOrEqual(3);
+    s.docker.containers.delete("epaper-api");
+    const orig = s.docker.up.bind(s.docker);
+    s.docker.up = async (o) => { await orig(o); for (const n of o.services ?? []) if (!s.docker.containers.has(`epaper-${n}`)) s.docker.add(n); };
+    await post(s, cookie, "/ops/up");
+    await post(s, cookie, "/ops/releases/2026-11-21.1/rollback", { confirm: "ROLLBACK" });
+    expect(s.docker.upCalls.length).toBeGreaterThanOrEqual(2);
+    for (const u of s.docker.upCalls) expect(u.env.PGDATA_SOURCE).toBe("/srv/epaper/restores/r1/pgdata");
   });
   it("files restore needs the word and a snapshot", async () => {
     const { s, cookie } = await ready();

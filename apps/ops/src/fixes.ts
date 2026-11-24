@@ -4,7 +4,7 @@ import type { ApiClient } from "./api-client.js";
 import { ApiUnavailable } from "./api-client.js";
 import type { BackupDriver } from "./backup.js";
 import type { Config } from "./config.js";
-import type { DockerDriver } from "./docker.js";
+import type { ContainerInfo, DockerDriver } from "./docker.js";
 import type { Health, ServiceDef } from "./health.js";
 import { maskSecrets } from "./mask.js";
 import { RELEASE_RE, type Releases } from "./releases.js";
@@ -60,7 +60,13 @@ export class Fixes {
     if (!s) throw new OpsError(404, `There is no service called '${name}' on this desk.`);
     return s;
   }
-  private composeService(def: ServiceDef): string { return (def.container ?? def.name).replace(/^epaper-/, ""); }
+  /** The compose service of a row: Docker's own label when the container exists, else the container name minus the project prefix. */
+  private composeService(def: ServiceDef, known: ContainerInfo[] = []): string {
+    const c = known.find((x) => x.name === def.container);
+    if (c?.service) return c.service;
+    const name = def.container ?? def.name, prefix = `${this.d.cfg.composeProject}-`;
+    return name.startsWith(prefix) ? name.slice(prefix.length) : name.replace(/^epaper-/, "");
+  }
   private need(given: string | undefined, word: string, what: string) {
     if ((given ?? "").trim().toUpperCase() !== word)
       throw new OpsError(400, `Nothing was changed. To ${what}, type the word ${word} in the box and press again.`, { needs_confirm: word });
@@ -115,14 +121,17 @@ export class Fixes {
 
   /** start if stopped, create if missing, restart if running. Same end state every time. */
   private async bringUp(def: ServiceDef): Promise<void> {
-    const c = (await this.d.docker.list()).find((x) => x.name === def.container);
-    if (!c) await this.d.docker.up({ services: [this.composeService(def)], env: this.releaseEnv() });
+    const all = await this.d.docker.list();
+    const c = all.find((x) => x.name === def.container);
+    if (!c) await this.d.docker.up({ services: [this.composeService(def, all)], env: this.releaseEnv() });
     else if (c.state !== "running") await this.d.docker.start(c.name);
     else await this.d.docker.restart(c.name, def.name === "postgres" ? 60 : 10); // the database gets time to close cleanly
   }
-  private releaseEnv(): Record<string, string> {
-    const cur = this.d.releases.current();
-    return cur ? { EPAPER_RELEASE: cur } : {};
+  /** What every `compose up` must carry: the release, and the database folder if the desk switched to a restored copy. */
+  private releaseEnv(release?: string): Record<string, string> {
+    const cur = release ?? this.d.releases.current();
+    const db = this.d.releases.dbSource();
+    return { ...(cur ? { EPAPER_RELEASE: cur } : {}), ...(db ? { PGDATA_SOURCE: db } : {}) };
   }
   private order(): ServiceDef[] {
     const defs = this.d.services().filter((s) => s.container && s.fixes.includes("restart") && s.name !== "ops");
@@ -143,12 +152,18 @@ export class Fixes {
       return { ok: true as const, message: "Everything was restarted, one after the other, and each one is healthy.", order: order.map((s) => s.name) };
     });
   }
-  async pullUp(): Promise<{ ok: true; message: string }> {
+  /** Start whatever is stopped or missing, in dependency order. Anything already running is left alone (no restart, no recreate). */
+  async pullUp(): Promise<{ ok: true; message: string; started: string[] }> {
     return this.once("pull-up", async () => {
-      const order = this.order();
-      await this.d.docker.up({ services: order.map((s) => this.composeService(s)), env: this.releaseEnv() });
-      await this.waitGreen(order.map((s) => s.name), "The services");
-      return { ok: true as const, message: "Everything that should be running is running." };
+      const started: string[] = [];
+      for (const s of this.order()) {
+        const c = (await this.d.docker.list()).find((x) => x.name === s.container);
+        if (c?.state === "running") continue;
+        await this.bringUp(s);
+        started.push(s.name);
+        await this.waitGreen([s.name], s.title ?? s.name);
+      }
+      return { ok: true as const, started, message: started.length ? `Started: ${started.join(", ")}. Everything that should be running is running.` : "Everything that should be running is already running." };
     });
   }
 
@@ -159,7 +174,8 @@ export class Fixes {
       if (!kept.includes(tag)) throw new OpsError(404, `Release ${tag} is not kept on this box. The last ${this.d.cfg.keepReleases} are: ${kept.join(", ") || "none"}.`, { releases: kept });
       const prev = this.d.releases.current();
       if (prev === tag) {
-        const run = (await this.d.docker.list()).filter((c) => /^epaper-(api|worker)$/.test(c.name));
+        const mine = new Set(["api", "worker"].map((n) => this.d.services().find((x) => x.name === n)?.container).filter(Boolean));
+        const run = (await this.d.docker.list()).filter((c) => mine.has(c.name));
         if (run.length && run.every((c) => c.image.endsWith(`:${tag}`) && c.state === "running")) return { ok: true as const, already: true, release: tag, message: `Already on release ${tag}. Nothing to do.` };
       }
       this.need(confirm, CONFIRM.rollback, `go back to release ${tag}`);
@@ -167,11 +183,11 @@ export class Fixes {
       const names = ["api", "worker"];
       this.d.releases.setCurrent(tag);
       try {
-        await this.d.docker.up({ services: names, env: { EPAPER_RELEASE: tag } });
+        await this.d.docker.up({ services: names, env: this.releaseEnv(tag) });
         await this.waitGreen(names, "The old release");
       } catch (e) {
         // back out: put the pointer back and bring the previous one up again
-        if (prev) { this.d.releases.setCurrent(prev); await this.d.docker.up({ services: names, env: { EPAPER_RELEASE: prev } }).catch(() => {}); }
+        if (prev) { this.d.releases.setCurrent(prev); await this.d.docker.up({ services: names, env: this.releaseEnv(prev) }).catch(() => {}); }
         throw new OpsError(502, `Release ${tag} did not start cleanly, so the desk went back to ${prev ?? "the previous build"}. Your data is untouched (safety copy ${snap}). ${(e as Error).message}`, { rolled_back_to: prev });
       }
       return { ok: true as const, release: tag, message: `Now running release ${tag}. A safety copy was taken first (${snap}).` };
@@ -252,7 +268,11 @@ export class Fixes {
   async restoreDb(to: string, confirm: string | undefined) {
     return this.once(`restore-db:${to}`, async () => {
       const known = this.restores.read().byTo[to];
-      if (known) return { ok: true as const, already: true, id: known, message: "This restore was already built. Compare the numbers, then switch.", counts: [] as { table: string; live: number; restored: number }[] };
+      if (known) {
+        // built before: the program brings the second database back up if it stopped meanwhile, and re-reads the numbers
+        const again = await this.d.backup.restoreDb(to);
+        return { ok: true as const, already: true, id: known, message: "This restore was already built. Compare the numbers, then switch.", counts: again.counts };
+      }
       this.need(confirm, CONFIRM.restore, `build a copy of the database as it was at ${to}`);
       const snap = await this.snapshot(`before db restore to ${to}`);
       const r = await this.d.backup.restoreDb(to);
@@ -268,7 +288,10 @@ export class Fixes {
       const snap = await this.snapshot(`before switching to restore ${id}`);
       await this.d.backup.switchDb(id);
       this.restores.update((s) => ({ ...s, switched: { ...s.switched, [id]: true } }));
-      return { ok: true as const, message: `The restored database is now the live one. The old one is kept for 7 days (safety copy ${snap}).` };
+      // the api and worker held connections to the old database: bring them back one after the other
+      let restarted = "The api and worker were restarted and are healthy.";
+      try { await this.restartAll(); } catch (e) { restarted = `The switch worked, but a restart afterwards did not finish (${(e as Error).message}) Press "Restart everything".`; }
+      return { ok: true as const, message: `The restored database is now the live one. The old one is kept for 7 days (safety copy ${snap}). ${restarted}` };
     });
   }
   async restoreFiles(scope: "file" | "edition" | "all", at: string, confirm: string | undefined) {

@@ -149,7 +149,7 @@ export class Health {
         if (dockerError) red(`${title}: the desk cannot ask Docker (${dockerError})`, "Check that the 'dockerproxy' container is running. If it is not, the box needs a restart by the host provider.");
         else if (!c) red(`${title} does not exist: its container was never created or was removed.`, "Press 'Bring everything up'.");
         else if (c.state !== "running") red(`${title} is stopped${c.exitCode ? ` (it crashed with code ${c.exitCode})` : ""}.`, "Press 'Fix it' to start it again. Nothing saved is lost.");
-        else if (c.state === "running" && def.ready === "pg_isready") {
+        else if (c.state === "running" && (def.ready === "pg_isready" || def.ready === "container_health")) {
           if (c.health === "healthy") plain = `${title} is running and answering.`;
           else if (c.health === "starting") amber(`${title} is starting up. Wait a minute.`);
           else if (c.health === "unhealthy") red(`${title} is running but not answering.`, "Press 'Fix it'. Your data is safe on disk.");
@@ -169,7 +169,7 @@ export class Health {
           const bad = Object.entries(checks).filter(([, v]) => v !== "ok").map(([k, v]) => `${k}: ${v}`);
           if (young) amber(`${title} is starting up.`); else red(`${title} answers but says it is not ready${bad.length ? ` (${bad.join("; ")})` : ""}.`);
         }
-      } else if (state === "green" && def.ready !== "self" && def.ready !== "pg_isready" && /[<>=]/.test(def.ready)) {
+      } else if (state === "green" && def.ready !== "self" && def.ready !== "pg_isready" && def.ready !== "container_health" && /[<>=]/.test(def.ready)) {
         try {
           const okNow = evalExpr(def.ready, m);
           const warn = def.warn ? evalExpr(def.warn, m) : false;
