@@ -63,16 +63,35 @@ export async function loadArticles(paper_id: string, opts: { ids?: string[]; dat
   return rows.map((r) => r.data as unknown as Article);
 }
 
-/** For rendering: pictures we already hold are inlined, so a render never depends on the website being up. */
-export async function articlesForRender(paper_id: string, articles: Article[]): Promise<Article[]> {
+/** Longest edge of the picture used for fitting and the screen PDF. The untouched original stays in the store for print. */
+const WEB_PX = 1600;
+
+/**
+ * For rendering: pictures we already hold are inlined, so a render never depends on the website being up.
+ * `size: "web"` (the default) inlines a 1600 px copy, made once and kept, so a 5000 px photo does not make the
+ * page renderer crawl; `size: "original"` inlines the untouched file (print exports).
+ */
+export async function articlesForRender(paper_id: string, articles: Article[], opts: { size?: "web" | "original" } = {}): Promise<Article[]> {
+  const size = opts.size ?? "web";
   const ids = [...new Set(articles.flatMap((a) => a.images.map((i) => i.asset_id)))];
   const rows = await prisma.asset.findMany({ where: { paper_id, asset_id: { in: ids }, status: "ready", orig_key: { not: null } } });
   const uri = new Map<string, string>();
   for (const r of rows) {
     try {
-      const ext = r.orig_key!.split(".").pop();
-      const mime = ext === "png" ? "image/png" : ext === "webp" ? "image/webp" : "image/jpeg";
-      uri.set(r.asset_id, `data:${mime};base64,${(await driver.get(r.orig_key!)).toString("base64")}`);
+      let key = r.orig_key!;
+      let mime = key.endsWith(".png") ? "image/png" : key.endsWith(".webp") ? "image/webp" : "image/jpeg";
+      if (size === "web" && ((r.w ?? 0) > WEB_PX || (r.h ?? 0) > WEB_PX)) {
+        const d = (r.derivatives ?? {}) as Record<string, string>;
+        if (!d[String(WEB_PX)]) {
+          const sharp = (await import("sharp")).default;
+          const small = await sharp(await driver.get(r.orig_key!)).rotate().resize({ width: WEB_PX, height: WEB_PX, fit: "inside", withoutEnlargement: true }).jpeg({ quality: 82 }).toBuffer();
+          const f = await storeFile(paper_id, "web", "jpg", small);
+          d[String(WEB_PX)] = f.key;
+          await prisma.asset.update({ where: { id: r.id }, data: { derivatives: d as any } });
+        }
+        key = d[String(WEB_PX)]!; mime = "image/jpeg";
+      }
+      uri.set(r.asset_id, `data:${mime};base64,${(await driver.get(key)).toString("base64")}`);
     } catch { /* keep the website address */ }
   }
   return articles.map((a) => ({ ...a, images: a.images.map((i) => (uri.has(i.asset_id) ? { ...i, src: uri.get(i.asset_id)! } : i)) }));

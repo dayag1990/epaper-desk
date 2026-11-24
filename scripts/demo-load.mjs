@@ -11,6 +11,11 @@ const API = arg("--api", "http://127.0.0.1:8100");
 const SLUG = arg("--paper", "riverton-herald");
 const SITE = arg("--site", "http://demo-site:8190"); // must be reachable from inside the api container
 const EMAIL = arg("--email", process.env.SEED_OWNER_EMAIL ?? "owner@riverton.example");
+const TEMPLATE = arg("--template", "broadsheet-en");
+const PAGES = Number(arg("--pages", "4")); // 0 = one page per section (the template's section order)
+const MIN = Number(arg("--min", "15"));
+const SRCNAME = arg("--name", "Riverton Herald (demo site)");
+const FEED = process.argv.includes("--feed"); // ingest the site's RSS feed itself (reachable inside the compose network)
 const DATE = arg("--date", new Date().toISOString().slice(0, 10));
 let password = process.env.SEED_OWNER_PASSWORD;
 if (!password) {
@@ -44,9 +49,9 @@ const wiz = r.json;
 step(2, `wizard proposed a "${wiz.kind}" source (confidence ${wiz.confidence ?? "n/a"})`);
 
 const existing = (await call("GET", "/v1/sources")).json.items ?? [];
-let src = existing.find((s) => s.name === "Riverton Herald (demo site)");
+let src = existing.find((s) => s.name === SRCNAME);
 if (!src) {
-  r = await call("POST", "/v1/sources", { kind: wiz.kind, name: "Riverton Herald (demo site)", config: wiz.config, mapping: wiz.mapping });
+  r = await call("POST", "/v1/sources", FEED ? { kind: "rss", name: SRCNAME, config: { url: SITE.replace(/\/$/, "") + "/rss.xml" } } : { kind: wiz.kind, name: SRCNAME, config: wiz.kind === "scrape" ? { ...wiz.config, max_links: 100 } : wiz.config, mapping: wiz.mapping });
   if (r.status >= 300) fail("could not save the source", r);
   src = r.json;
 }
@@ -62,15 +67,15 @@ const synced = await until("the sync to finish", async () => {
   return s.last_sync_at && s.last_sync_at !== syncedBefore && String(s.status).startsWith("ok") ? s : null;
 });
 const arts = (await call("GET", "/v1/articles")).json.items ?? [];
-if (arts.length < 15) fail(`only ${arts.length} articles after the sync`);
+if (arts.length < MIN) fail(`only ${arts.length} articles after the sync`);
 step(4, `${arts.length} articles ingested; ${synced.status} (${secs()})`);
 
-r = await call("POST", "/v1/editions", { paper: SLUG, date: DATE, template_set: "broadsheet-en", name: "Main" });
+r = await call("POST", "/v1/editions", { paper: SLUG, date: DATE, template_set: TEMPLATE, name: "Main" });
 if (r.status >= 300) fail("could not create the edition", r);
 const editionId = r.json.id;
-r = await call("POST", `/v1/editions/${editionId}/autoplan`, { pages: 4 });
+r = await call("POST", `/v1/editions/${editionId}/autoplan`, PAGES ? { pages: PAGES } : {});
 if (r.status >= 300) fail("auto-plan did not start", r);
-const ed = await until("4 planned pages", async () => { const e = (await call("GET", `/v1/editions/${editionId}`)).json; return (e.pages ?? []).length === 4 ? e : null; });
+const ed = await until("the planned pages", async () => { const e = (await call("GET", `/v1/editions/${editionId}`)).json; return (e.pages ?? []).length >= (PAGES || 8) && e.status !== "planning" ? e : null; });
 step(5, `auto-planned ${ed.pages.length} pages (${secs()})`);
 
 r = await call("POST", `/v1/editions/${editionId}/exports`, { format: "pdf_screen" });

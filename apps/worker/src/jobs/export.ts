@@ -26,7 +26,7 @@ export async function exportRun(e: Envelope, job: JobCtx) {
     const docs = rows.map((r) => PageDocSchema.parse(r.doc));
     const pages: EditionPage[] = docs.map((doc, i) => ({ doc, template: templates.find((t) => t.id === doc.page.template) ?? templates.find((t) => t.id === rows[i]!.template_id) ?? templates[0]! }));
     const ids = [...new Set(docs.flatMap((d) => d.items.map((i) => i.article_id).filter(Boolean) as string[]))];
-    const articles = await articlesForRender(e.paper_id, await loadArticles(e.paper_id, { ids }));
+    const articles = await articlesForRender(e.paper_id, await loadArticles(e.paper_id, { ids }), { size: ex.format === "pdf_screen" ? "web" : "original" });
 
     if (ex.format === "cxml") {
       const xml = toCXML(pageDocsToModel(docs as PageDoc[], articles));

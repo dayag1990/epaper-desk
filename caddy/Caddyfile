@@ -26,6 +26,9 @@
 	handle_path /demo-site/* {
 		reverse_proxy demo-site:8190
 	}
+	handle_path /demo-site-ta/* {
+		reverse_proxy demo-site-ta:8190
+	}
 	handle {
 		root * /srv/reader
 		try_files {path} /index.html
