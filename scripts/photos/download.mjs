@@ -75,7 +75,7 @@ for (const title of sel) {
   credits.photos.push({
     id, file, width: meta.width, height: meta.height, bytes: out.length, sha256: sha,
     title: base, creator, creator_url: href ? absUrl(href.replace(/&amp;/g, "&")) : null,
-    licence_short: f.licShort, licence_url: f.licUrl || null, source_url: pageUrl, original_file_url: f.url,
+    licence_short: f.licShort, licence_url: f.licUrl || `${pageUrl}#Licensing`, source_url: pageUrl, original_file_url: f.url,
     retrieved_at: new Date().toISOString(), tags: words, sections: f.sections,
     orientation: meta.width > meta.height * 1.05 ? "horizontal" : meta.height > meta.width * 1.05 ? "vertical" : "square",
     max_available: long < 3840,
