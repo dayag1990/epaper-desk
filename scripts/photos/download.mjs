@@ -4,7 +4,7 @@ import fs from "node:fs";
 import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
 import sharp from "sharp";
-import { polite, UA, ASSET_DIR, WORK_DIR, readJson, writeJson, stripHtml, shortenCredit, classifyLicence } from "./lib.mjs";
+import { polite, UA, ASSET_DIR, WORK_DIR, readJson, writeJson, stripHtml, shortenCredit, classifyLicence, cleanCreatorUrl } from "./lib.mjs";
 
 const CREDITS = new URL("../../fixtures/demo-site-ta/photo-credits.json", import.meta.url).pathname;
 const REJ = `${WORK_DIR}/download-rejects.json`;
@@ -74,7 +74,7 @@ for (const title of sel) {
   const words = [...new Set([...f.queries.filter((x) => !x.startsWith("openverse:")).slice(0, 1).flatMap((x) => x.toLowerCase().split(/\W+/)), ...f.tags])].filter((w) => w && !STOP.has(w));
   credits.photos.push({
     id, file, width: meta.width, height: meta.height, bytes: out.length, sha256: sha,
-    title: base, creator, creator_url: href ? absUrl(href.replace(/&amp;/g, "&")) : null,
+    title: base, creator, creator_url: href ? cleanCreatorUrl(absUrl(href.replace(/&amp;/g, "&"))) : null,
     licence_short: f.licShort, licence_url: f.licUrl || `${pageUrl}#Licensing`, source_url: pageUrl, original_file_url: f.url,
     retrieved_at: new Date().toISOString(), tags: words, sections: f.sections,
     orientation: meta.width > meta.height * 1.05 ? "horizontal" : meta.height > meta.width * 1.05 ? "vertical" : "square",

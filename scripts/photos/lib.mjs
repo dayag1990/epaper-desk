@@ -60,13 +60,19 @@ export function shortenCredit(creator, lic) {
   const post = ` / Wikimedia Commons (${lic})`;
   const seg = new Intl.Segmenter("und", { granularity: "grapheme" });
   const g = [...seg.segment(creator)].map((x) => x.segment);
-  const fits = (n) => [...pre].length + n + [...post].length <= 70;
-  let line = pre + creator + post;
+    let line = pre + creator + post;
   if ([...line].length <= 70 && line.length <= 70) return line;
   let n = Math.min(30, g.length);
-  while (n > 1 && ![...pre].length + n + 1 + [...post].length <= 70) n--;
+  while (n > 1 && [...pre].length + n + 1 + [...post].length > 70) n--;
   return pre + g.slice(0, n).join("").trimEnd() + "…" + post;
 }
 
 export const readJson = (p, d) => (fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, "utf8")) : d);
 export const writeJson = (p, v) => fs.writeFileSync(p, JSON.stringify(v, null, 2) + "\n");
+
+// Commons "redlink" user links (user page not created) -> plain /wiki/User: link.
+export function cleanCreatorUrl(u) {
+  if (!u) return u;
+  const m = /[?&]title=(User:[^&]+)/.exec(u);
+  return m && /redlink=1|action=edit/.test(u) ? `https://commons.wikimedia.org/wiki/${m[1]}` : u;
+}
