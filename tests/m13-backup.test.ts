@@ -155,6 +155,106 @@ if [ "${mode}" = cap ]; then echo '{"code":"transaction_cap_exceeded","message":
   });
 });
 
+describe("the bucket's daily request budget (owner rule 2026-11-24: each class under 2,000 a day)", () => {
+  const today = () => new Date().toISOString().slice(0, 10);
+  const setup = () => {
+    const d = tmp(), bin = path.join(d, "bin"); mkdirSync(bin);
+    for (const x of ["files", "walarchive", "basebackups", "snapshots", "lock"]) mkdirSync(path.join(d, x));
+    const log = path.join(d, "restic.log");
+    writeFileSync(path.join(bin, "restic"), `#!/bin/sh
+echo "$@" >> ${log}
+case "$1" in backup) echo "snapshot abcd1234 saved";; esac
+exit 0
+`);
+    writeFileSync(path.join(bin, "curl"), `#!/bin/sh
+echo '{"code":"transaction_cap_exceeded","status":403}'
+`);
+    chmodSync(path.join(bin, "restic"), 0o755); chmodSync(path.join(bin, "curl"), 0o755);
+    const env: Record<string, string | undefined> = { ...process.env, PATH: `${bin}:${process.env.PATH}`, DATA: d, LOCKDIR: path.join(d, "lock"), RESTIC_REPOSITORY: "s3:x/y", BACKUP_S3_ENDPOINT: "https://s3.eu.backblazeb2.com", BACKUP_S3_KEY: "k", BACKUP_S3_SECRET: "s", CONFIG_COPY: path.join(d, "none") };
+    const ledgerFile = path.join(d, "b2-ledger.json");
+    const seed = (o: object) => writeFileSync(ledgerFile, JSON.stringify({ day: today(), A: 0, B: 0, C: 0, pushes: 0, prune_done: false, drill_done: false, ...o }));
+    const ledger = () => JSON.parse(readFileSync(ledgerFile, "utf8"));
+    const run = (...a: string[]) => spawnSync(bk, a, { env, encoding: "utf8" });
+    const status = () => JSON.parse(readFileSync(path.join(d, "backup-status.json"), "utf8"));
+    const calls = () => (existsSync(log) ? readFileSync(log, "utf8").trim().split("\n") : []);
+    return { d, env, seed, ledger, run, status, calls };
+  };
+  it("every push books its measured cost (6/3/8 rounded up to 8/4/10, plus the empty-cache extra once)", () => {
+    const t = setup();
+    t.run("push"); t.run("push");
+    const l = t.ledger();
+    expect(l.pushes).toBe(2);
+    expect([l.A, l.B, l.C]).toEqual([8 + 24 + 8, 4 + 16 + 4, 10 + 0 + 10]); // the first push also pays the cold-cache extra
+  });
+  it("a day's 96 pushes fit under 1,800 with the clean-up and the restore check still reserved", () => {
+    const t = setup();
+    t.seed({ pushes: 0 });
+    // 96 pushes + the empty-cache extra, as the ledger counts them
+    t.seed({ A: 8 * 95 + 32, B: 4 * 95 + 20, C: 10 * 95 + 10 });
+    const r = t.run("push");
+    expect(r.status).toBe(0);
+    expect(t.calls().some((c) => c.startsWith("backup"))).toBe(true);
+  });
+  it("a push that would break the budget waits, says so in plain words, and sends no request", () => {
+    const t = setup();
+    t.seed({ A: 1000 });                       // 1000 + 8 + 800 reserved for the clean-up > 1,800
+    t.run("push");
+    expect(t.status().errors.push.msg).toMatch(/paused until 00:00 UTC.*daily request limit/);
+    expect(t.calls()).toEqual([]);
+    expect(t.ledger().A).toBe(1000);           // nothing was spent
+  });
+  it("once the clean-up and the restore check have run, their reserve is free again", () => {
+    const t = setup();
+    t.seed({ A: 1000, prune_done: true, drill_done: true });
+    t.run("push");
+    expect(t.calls().some((c) => c.startsWith("backup"))).toBe(true);
+  });
+  it("a new UTC day starts from zero", () => {
+    const t = setup();
+    writeFileSync(path.join(t.d, "b2-ledger.json"), JSON.stringify({ day: "2020-01-01", A: 1799, B: 1799, C: 1799, pushes: 99, prune_done: true, drill_done: true }));
+    t.run("push");
+    const l = t.ledger();
+    expect(l.day).toBe(today()); expect(l.pushes).toBe(1); expect(l.A).toBeLessThan(100);
+  });
+  it("a used-up cap waits until 00:05 UTC, not ten minutes", () => {
+    const t = setup();
+    writeFileSync(path.join(t.d, "bin", "restic"), `#!/bin/sh\necho "Fatal: unable to open config file: Stat: Access Denied." >&2\nexit 1\n`);
+    t.run("push");
+    const until = +readFileSync(path.join(t.d, "lock", "push-backoff"), "utf8");
+    const n = new Date(); const want = Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate() + 1, 0, 5) / 1000;
+    expect(Math.abs(until - want)).toBeLessThan(10);
+  });
+  it("the nightly clean-up books its full cost once, a retry only a little, and does not run while the bucket refuses", () => {
+    const t = setup();
+    t.run("prune");
+    const a = t.ledger();
+    expect(a.prune_done).toBe(true); expect(a.A).toBe(800);
+    t.run("prune");
+    expect(t.ledger().B).toBe(402); // 400 for the first try, 2 for the retry
+    writeFileSync(path.join(t.d, "lock", "push-backoff"), String(Math.floor(Date.now() / 1000) + 3600));
+    const n = t.calls().length;
+    t.run("prune");
+    expect(t.calls().length).toBe(n);
+  });
+  it("the restore drill is one a day unless asked again, and the ledger counts it", () => {
+    const t = setup();
+    expect(t.run("ledger", "drill").status).toBe(0);
+    const again = t.run("ledger", "drill");
+    expect(again.status).toBe(3); expect(again.stdout).toMatch(/already read the bucket today/);
+    expect(t.run("ledger", "drill", "--again").status).toBe(0);
+    expect(t.ledger().B).toBe(240);
+  });
+  it("the status stays 'healthy' between 15-minute pushes, and turns unhealthy when a push is missed", () => {
+    const d = tmp(), status = path.join(d, "backup-status.json");
+    const env = { ...process.env, STATUS: status, LOCKDIR: d, DATA: d, PUSH_INTERVAL: "900" };
+    const at = (secAgo: number) => new Date(Date.now() - secAgo * 1000).toISOString().replace(/\.\d+Z$/, "Z");
+    const go = (secAgo: number) => { execFileSync("bash", ["-c", `. ${root}/ops/backup/lib.sh; st_set '.push.last_ok="${at(secAgo)}" | .basebackup.last_ok=$now'; st_clear push`], { env }); return JSON.parse(readFileSync(status, "utf8")); };
+    expect(go(14 * 60).healthy).toBe(true);     // 14 minutes since the last push
+    expect(go(31 * 60).healthy).toBe(true);     // one push missed: still inside two intervals
+    expect(go(40 * 60).healthy).toBe(false);    // two pushes missed
+  });
+});
+
 describe("old copies the desk may free (scripts/lib/desk-ops.sh desk_old_copies)", () => {
   const stamp = (daysAgo: number) => new Date(Date.now() - daysAgo * 86400_000).toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
   function setup(opts: { pushedDaysAgo: number | null; live?: string; wasLive?: string[] }) {

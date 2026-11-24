@@ -98,4 +98,23 @@ Old safety dumps (`/srv/epaper/snapshots/*.sql.gz`) and restored database copies
 The screen lists what stays and why.
 
 ## The bucket says "daily usage cap" or "Access Denied"
-The status line says which in plain words (Backblaze's own answer is read once per 10 minutes). The cap resets at 00:00 UTC; raise it in Backblaze > Caps & Alerts. The push waits 10 minutes between tries while the bucket refuses, and normally runs every `PUSH_INTERVAL` seconds (default 600; 60 needs raised caps, because a push every minute used up the free allowance by 03:00 UTC on 2026-11-24).
+The status line says which in plain words (Backblaze's own answer is read once, when a push is refused). The daily cap resets at 00:00 UTC; raise it in Backblaze > Caps & Alerts (or add a card). While the bucket says "cap used up", pushes and the clean-up wait until 00:05 UTC and spend nothing; for other refusals they wait 15 minutes. Local backups (WAL every 30 s, nightly base backup) are not affected.
+
+## Bucket request budget (demo phase, since 2026-11-24)
+Owner rule: keep each Backblaze request class under 2,000 a day, counting the pushes, the nightly clean-up and the daily restore check. Pushes run every 15 minutes (`PUSH_INTERVAL=900`); the owner has no paid Backblaze plan yet. Measured on 2026-11-24 with restic 0.17.3 against a counting S3 stand-in (A = uploads and deletes, B = reads and HEAD, C = lists and login):
+
+| What | A | B | C | Times a day | A / B / C a day |
+|---|---|---|---|---|---|
+| One push (warm cache) | 6 | 3 | 8 | 96 | 576 / 288 / 768 |
+| First push after the backup container starts (empty cache) | 30 | 20 | 8 | on start | +24 / +16 / 0 |
+| Nightly clean-up at 03:30 UTC (forget + prune, steady state: about 70 snapshots, 100 index files, 180 packs go) | 380 | 87 | 10 | 1 | 380 / 87 / 10 |
+| The same after a 3-day backlog | 1,169 | 267 | 10 | rare | |
+| Daily restore check that reads the bucket (`scripts/restore-readonly-drill.sh`: list + restore of the database parts) | 2 | 48 | 8 | 1 | 2 / 48 / 8 |
+| `restic check --read-data-subset=1%` + snapshot list (the desk's "Check backups now") | 2 | 37 | 16 | 1 | 2 / 37 / 16 |
+| **Total, normal day** | | | | | **about 960 / 460 / 800** |
+
+Where the numbers come from: `restic backup` always lists keys, locks, snapshots and index (8 list calls), reads the config and one key, then uploads one data pack, one index and one snapshot, and takes and drops a lock (a backup writes a lock even with `--no-lock`). Reads stay at 3 because the restic cache (`/cache`, in memory) holds the index and snapshots.
+
+The backup service keeps a **ledger** (`/srv/epaper/b2-ledger.json`, one record per UTC day) with these costs rounded up (8/4/10 per push, 800/400/40 for the clean-up, 4/120/40 for the restore check) and a limit of 1,800 per class. The clean-up and the restore check are reserved until they have run, so a bad day cannot starve them. A push that would break the limit is not sent: the status line says "paused until 00:00 UTC to stay under the daily request limit" and shows the counts (`bk ledger show` prints them). The restore check refuses a second run on the same UTC day (`DRILL_AGAIN=1` overrides, at about 120 reads). With a paid plan, raise the limit (`B2_DAY_LIMIT`) and set `PUSH_INTERVAL=60`.
+
+**Demo-phase limit:** the off-box copy can be up to about 15 minutes behind (plus the time a push takes). If this server is lost, up to 15 minutes of the last work (new files, and the database changes since the last push) may be gone. On this server the WAL archive is every 30 seconds, so a crash of the database alone loses nothing.

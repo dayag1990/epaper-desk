@@ -32,6 +32,13 @@ mkdir -p "$W" || { echo "cannot make $W"; exit 2; }
 for k in BACKUP_S3_ENDPOINT BACKUP_S3_KEY BACKUP_S3_SECRET; do v=$(grep -E "^$k=" "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2-); [ -n "$v" ] && export "$k=$v"; done
 make_envf || { echo "FAIL: the bucket values are missing in $ENV_FILE"; exit 2; }
 
+# the daily request budget of the bucket (owner rule 2026-11-24, see docs/RUNBOOK.md): one drill a day, booked in the ledger
+if [ -z "${BACKUP_REPO_LOCAL:-}" ]; then
+  led=$(dk exec "${BK_CONTAINER:-epaper-backup}" /opt/backup/bk ledger drill ${DRILL_AGAIN:+--again} 2>&1); lrc=$?
+  if [ $lrc -eq 3 ] || [ $lrc -eq 4 ]; then echo "STOP: $led"; exit 3; fi
+  [ $lrc -eq 0 ] || echo "note: the request ledger could not be reached ($led). Going on; today's count will be a little short."
+fi
+
 echo "== 1. read the newest backup list (no lock, read only)"
 err="$W/restic.err"
 snaps=$(restic_run -- snapshots --no-lock --host epaper --tag auto --latest 1 --json 2>"$err"); rc=$?

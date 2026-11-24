@@ -41,9 +41,20 @@ do_push() {
   # after a failure wait before trying again (each try costs bucket requests); the wait is 10 minutes
   local wait_until; wait_until=$(cat "$LOCKDIR/push-backoff" 2>/dev/null || echo 0)
   if [ "$(date +%s)" -lt "${wait_until:-0}" ]; then return 1; fi
+  # the daily request budget (see lib.sh): a push that would break it waits for tomorrow, and says so
+  local cost="$COST_PUSH"; [ -f "$LOCKDIR/cold-paid" ] || cost=$(awk -v a="$COST_PUSH" -v b="$COST_COLD" 'BEGIN{split(a,x," ");split(b,y," ");print x[1]+y[1],x[2]+y[2],x[3]+y[3]}')
+  if ! ledger_room "$cost"; then
+    st_err push "The off-box push is paused until 00:00 UTC to stay under the daily request limit of the bucket ($(ledger_show | jq -r '"used today: \(.A) / \(.B) / \(.C) of '"$B2_DAY_LIMIT"'"')). Local backups carry on."
+    return 1
+  fi
+  ledger_add "$cost" push; : > "$LOCKDIR/cold-paid"
   local rerr; rerr=$(ensure_repo 2>&1 >/dev/null) || {
-    rm -f "$LOCKDIR/repo-ok"; date -d '+10 minutes' +%s > "$LOCKDIR/push-backoff"
-    case "$rerr" in *"Access Denied"*|*"403"*) st_err push "$(b2_refusal)";; *) st_err push "Cannot reach or open the off-box bucket: $(tail -1 <<<"$rerr" | cut -c1-140)";; esac
+    rm -f "$LOCKDIR/repo-ok"; ledger_add "0 2 4"
+    case "$rerr" in
+      *"Access Denied"*|*"403"*) local why; why=$(b2_refusal); ledger_add "0 0 1"; st_err push "$why"
+        case "$why" in *"usage cap"*) date -d "+$(secs_to_cap_reset) seconds" +%s > "$LOCKDIR/push-backoff";; *) date -d '+15 minutes' +%s > "$LOCKDIR/push-backoff";; esac;;
+      *) date -d '+15 minutes' +%s > "$LOCKDIR/push-backoff"; st_err push "Cannot reach or open the off-box bucket: $(tail -1 <<<"$rerr" | cut -c1-140)";;
+    esac
     return 1
   }
   find "$WAL_DIR" -maxdepth 1 -name '.tmp.*' -mmin +60 -delete 2>/dev/null
@@ -55,11 +66,13 @@ do_push() {
   out=$(timeout -k 15 "$PUSH_TIMEOUT" restic backup --host epaper --tag auto --skip-if-unchanged \
         --exclude '.tmp.*' --exclude '.partial-*' --exclude '*.lock' --exclude 'node_modules' --exclude 'dist' --exclude '.vite' --exclude '*.tsbuildinfo' "${paths[@]}" 2>&1); rc=$?
   if [ $rc -eq 124 ] || [ $rc -eq 137 ]; then
-    st_err push "The upload stalled for $PUSH_TIMEOUT seconds and was stopped. It tries again next minute."; return 1
+    st_err push "The upload stalled for $PUSH_TIMEOUT seconds and was stopped. It tries again at the next push."; return 1
   elif [ $rc -ne 0 ]; then
     rm -f "$LOCKDIR/repo-ok"
-    if grep -q 'Access Denied' <<<"$out"; then date -d '+10 minutes' +%s > "$LOCKDIR/push-backoff"; msg="$(b2_refusal)"
-    elif grep -q 'already locked' <<<"$out"; then msg="The bucket is locked by another backup job. Trying again next minute."
+    if grep -q 'Access Denied' <<<"$out"; then
+      msg="$(b2_refusal)"; ledger_add "0 0 1"
+      case "$msg" in *"usage cap"*) date -d "+$(secs_to_cap_reset) seconds" +%s > "$LOCKDIR/push-backoff";; *) date -d '+15 minutes' +%s > "$LOCKDIR/push-backoff";; esac
+    elif grep -q 'already locked' <<<"$out"; then msg="The bucket is locked by another backup job. Trying again at the next push."
     else msg="The push to the off-box bucket failed: $(tail -1 <<<"$out" | tr -d '\r' | cut -c1-160)"; fi
     st_err push "$msg"; return 1
   fi
@@ -119,6 +132,10 @@ cmd_prune() {
   load_restic_env || return 2
   exec 9>"$LOCKDIR/push.lock"; flock -w 300 9 || { log "prune: push is busy, trying again later"; return 1; }
   local out
+  # the bucket said "cap used up" (or is backing off): do not spend more requests on it before the wait is over
+  [ "$(date +%s)" -lt "$(cat "$LOCKDIR/push-backoff" 2>/dev/null || echo 0)" ] && { log "prune: the bucket is refusing requests, waiting"; return 1; }
+  # the first try of the day books the whole clean-up; a retry after a failure books only a small amount
+  if [ "$(ledger_show | jq -r .prune_done)" = true ]; then ledger_add "0 2 6"; else ledger_add "$COST_PRUNE" prune; fi
   if out=$(timeout -k 15 3000 restic forget --host epaper --tag auto --keep-hourly 24 --keep-daily 14 --keep-weekly 4 --prune 2>&1); then
     st_set '.prune.last_ok=$now'; st_clear prune
   else st_err prune "The nightly clean-up of old backups in the bucket failed: $(tail -1 <<<"$out" | cut -c1-160)"; return 1; fi
@@ -130,10 +147,12 @@ cmd_check() {
   say() { echo "$*"; }
   if [ -s "$STATUS" ] && last=$(jq -r '.push.last_ok // empty' "$STATUS") && [ -n "$last" ]; then
     age=$(( now_e - $(epoch "$last") ))
-    if [ "$age" -lt 300 ]; then say "OK: the last push to the bucket was $age seconds ago."; else say "FAIL: the last push to the bucket was $((age/60)) minutes ago (limit 5)."; bad=1; fi
+    local lim=$(( 2 * PUSH_INTERVAL + 120 ))
+    if [ "$age" -lt "$lim" ]; then say "OK: the last push to the bucket was $((age/60)) minutes ago (pushes run every $((PUSH_INTERVAL/60)) minutes)."; else say "FAIL: the last push to the bucket was $((age/60)) minutes ago (limit $((lim/60)))."; bad=1; fi
   else say "FAIL: no push to the bucket has succeeded yet."; bad=1; fi
   load_restic_env || { say "FAIL: a bucket value or the backup password is empty."; return 1; }
-  if out=$(timeout 90 restic snapshots --latest 1 --host epaper --compact 2>&1); then say "OK: the off-box bucket answers and the repository opens."
+  ledger_add "2 45 20" drill   # measured: snapshot list 0/3/7, 1% data read 2/34/9
+  if out=$(timeout 90 restic snapshots --no-lock --latest 1 --host epaper --compact 2>&1); then say "OK: the off-box bucket answers and the repository opens."
   else say "FAIL: the off-box bucket is unreachable or the repository cannot be read ($(tail -1 <<<"$out" | cut -c1-120))."; return 1; fi
   newest=$(list_basebackups | head -1)
   if [ -n "$newest" ] && last=$(jq -r .finished "$BASE_DIR/$newest/manifest.json"); then
@@ -169,15 +188,19 @@ cmd_daemon() {
   mkdir -p "$BASE_DIR" 2>/dev/null; [ -w "$DATA" ] || { echo "backup: $DATA is not writable" >&2; exit 1; }
   for d in "$WAL_DIR" "$BASE_DIR"; do [ -d "$d" ] && [ -w "$d" ] || { echo "backup: $d is missing or not writable; run scripts/backup-init.sh" >&2; exit 1; }; done
   st_set '.prune.last_ok = (.prune.last_ok // $now)'   # first clean-up happens at the next 03:30, not at start
-  local interval=${PUSH_INTERVAL:-600} last_bb=0 last_pr=0
-  log "started: push every ${interval}s, base backup 03:00 UTC, keep $KEEP_BASEBACKUPS"
+  # One loop tick a minute does the cheap local work (Postgres archiver state, which keeps the status file fresh); the push to
+  # the bucket runs every PUSH_INTERVAL seconds (15 minutes in the demo phase: the owner has no paid Backblaze plan yet).
+  local interval=$PUSH_INTERVAL tick=60 last_bb=0 last_pr=0 last_push=0
+  [ "$interval" -ge "$tick" ] || tick=$interval
+  log "started: push every ${interval}s, base backup 03:00 UTC, keep $KEEP_BASEBACKUPS, bucket budget ${B2_DAY_LIMIT} requests a day per class"
   trap 'log "stopping"; exit 0' TERM INT
   while :; do
     [ -f "$LOCKDIR/role.ok" ] || init_role >/dev/null 2>&1 || true
     if [ -f "$LOCKDIR/role.ok" ] && bb_due && [ $(( $(date +%s) - last_bb )) -gt 900 ]; then last_bb=$(date +%s); ( cmd_basebackup ) & fi
     if prune_due && [ $(( $(date +%s) - last_pr )) -gt 3600 ]; then last_pr=$(date +%s); ( cmd_prune ) & fi
-    ( cmd_push ) &
-    sleep "$interval" & wait $!
+    if [ $(( $(date +%s) - last_push )) -ge "$interval" ]; then last_push=$(date +%s); ( cmd_push ) &
+    else archiver_state; fi
+    sleep "$tick" & wait $!
   done
 }
 
@@ -189,6 +212,14 @@ case "${1:-}" in
   retain) retain_basebackups "${2:-$KEEP_BASEBACKUPS}";;
   init-role) init_role;;
   check) cmd_check;;
+  ledger) case "${2:-show}" in
+      show) ledger_show;;
+      drill) # asked by scripts/restore-readonly-drill.sh before it reads the bucket: one drill a day
+        if [ "$(ledger_show | jq -r .drill_done)" = true ] && [ "${3:-}" != "--again" ]; then echo "The restore check already read the bucket today (UTC). Each run uses about 120 of the 2,000 daily read requests. Run it again tomorrow, or add --again if you must."; exit 3; fi
+        if ! ledger_room "$COST_DRILL"; then echo "Not enough of today's request budget is left for a restore check. Try again after 00:00 UTC."; exit 4; fi
+        ledger_add "$COST_DRILL" drill; echo ok;;
+      *) echo "usage: bk ledger show|drill [--again]" >&2; exit 64;;
+    esac;;
   health) cmd_health;;
   *) echo "usage: bk daemon|push|basebackup|prune|retain|init-role|check|health" >&2; exit 64;;
 esac

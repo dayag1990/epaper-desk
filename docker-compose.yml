@@ -55,9 +55,9 @@ services:
     container_name: ${BK_CONTAINER:-epaper-backup}
     environment:
       BACKUP_PREFIX: ${BACKUP_PREFIX:-epaper}
-      # 10 minutes by default: a push every minute used up Backblaze's free daily request cap by 03:00 UTC (2026-11-24).
-      # Set PUSH_INTERVAL=60 in .env only after raising the caps in Backblaze.
-      PUSH_INTERVAL: ${PUSH_INTERVAL:-600}
+      # 15 minutes (owner, 2026-11-24, demo phase, no paid Backblaze plan): a push every minute used up the free daily request cap by 03:00 UTC.
+      # Faster only after the caps are raised: the request ledger (ops/backup/lib.sh) keeps each class under 1,800 a day either way.
+      PUSH_INTERVAL: ${PUSH_INTERVAL:-900}
     volumes:
       - ${BACKUP_ROOT:-/srv/epaper}:/data
       - ${EPAPER_ENV:-/srv/epaper/.env}:/run/epaper.env:ro # config rides in the encrypted snapshot

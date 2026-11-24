@@ -49,8 +49,9 @@
   fixes: [run_now, verify_now]
 - name: last-backup-age
   title: Last backup
-  ready: last_backup_age_min <= 15
-  warn: last_backup_age_min > 5
+  # Pushes to the bucket run every 15 minutes in the demo phase (no paid Backblaze plan yet): green up to two pushes + a margin.
+  ready: last_backup_age_min <= 40
+  warn: last_backup_age_min > 25
   todo: 'Press "Back up now".'
   fixes: [run_now]
 - name: last-drill

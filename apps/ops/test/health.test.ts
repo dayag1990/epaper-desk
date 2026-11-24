@@ -109,9 +109,12 @@ describe("lights", () => {
   it("an old backup is amber then red; old drill is red; low disk is red", async () => {
     const s = mkStack();
     const ago = (min: number) => new Date(s.clock.now() - min * 60_000).toISOString();
-    s.backup.status_.files = { at: ago(8), size_bytes: 1 };
-    expect((await light(s, "last-backup-age")).state).toBe("amber");
+    // pushes to the bucket run every 15 minutes in the demo phase: green up to 25 min, amber to 40, red after
+    s.backup.status_.files = { at: ago(16), size_bytes: 1 };
+    expect((await light(s, "last-backup-age")).state).toBe("green");
     s.backup.status_.files = { at: ago(30), size_bytes: 1 };
+    expect((await light(s, "last-backup-age")).state).toBe("amber");
+    s.backup.status_.files = { at: ago(50), size_bytes: 1 };
     expect((await light(s, "last-backup-age")).state).toBe("red");
     s.backup.status_.drill = { at: ago(8 * 1440), result: "pass" };
     expect((await light(s, "last-drill")).state).toBe("red");
