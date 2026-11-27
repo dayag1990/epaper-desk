@@ -30,7 +30,7 @@ if (!password) { console.error("No owner password: set SEED_OWNER_PASSWORD in /s
 let cookie = "";
 async function call(method, path, body) {
   const r = await fetch(API + path, { method, headers: { ...(cookie ? { cookie } : {}), ...(body ? { "content-type": "application/json" } : {}) }, body: body ? JSON.stringify(body) : undefined });
-  const sc = r.headers.get("set-cookie"); if (sc) cookie = sc.split(";")[0];
+  const sc = r.headers.getSetCookie(); if (sc.length) cookie = sc.map((x) => x.split(";")[0]).join("; ");
   const text = await r.text(); let json; try { json = JSON.parse(text); } catch { json = text; }
   return { status: r.status, json };
 }

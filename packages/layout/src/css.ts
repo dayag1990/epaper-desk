@@ -31,8 +31,8 @@ export function paperCss(t: Template, opts: CssOptions = {}): string {
   hyphens:none;-webkit-hyphens:none;line-break:strict;word-break:normal;overflow-wrap:normal}
 .page *{box-sizing:border-box}
 .mast{background:var(--mast);color:#fff;padding:18px 28px 12px;display:flex;align-items:flex-end;justify-content:space-between;gap:24px}
-.mast .name{font-family:${t.fonts.head};font-weight:800;font-size:${t.masthead_px.name}px;line-height:1.05;letter-spacing:-1px;min-width:200px;white-space:nowrap}
-.mast .tag{font-size:${t.masthead_px.tag}px;font-weight:600;text-align:right;line-height:1.5;opacity:.95;min-width:120px}
+.mast .name{font-family:${t.fonts.head};font-weight:800;font-size:${t.masthead_px.name}px;line-height:1.05;letter-spacing:-1px;min-width:200px;white-space:nowrap;flex:0 0 auto}
+.mast .tag{font-size:${t.masthead_px.tag}px;font-weight:600;text-align:right;line-height:1.5;opacity:.95;min-width:120px;flex:1 1 0;overflow-wrap:anywhere}
 .strip{display:flex;justify-content:space-between;gap:20px;border-bottom:4px solid var(--rule);border-top:1px solid var(--rule);
   padding:7px 4px;margin:6px 0 20px;font-size:15px;font-weight:700;letter-spacing:.3px}
 .strip.inner{border-top:4px solid var(--red);margin-top:0}
