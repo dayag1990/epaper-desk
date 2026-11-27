@@ -1,4 +1,4 @@
-import type { Template } from "./template.js";
+import { isRuled, panelTint, type Template } from "./template.js";
 
 /** Where the editor (same origin as the API) fetches the template fonts from. The server render passes its own base (see fonts.ts). */
 export const DEFAULT_FONT_BASE = "/fonts";
@@ -70,5 +70,84 @@ export function paperCss(t: Template, opts: CssOptions = {}): string {
 .fig.empty small{display:block;font-weight:600;font-size:14px;color:#7a7465}
 [data-ph]:empty::before{content:attr(data-ph);color:#9a9a9a;font-weight:500}
 .mast [data-ph]:empty::before{color:rgba(255,255,255,.6)}
+${furnitureCss(t)}${isRuled(t) ? ruledCss(t) : ""}
 ${t.css_extra}`;
+}
+
+/**
+ * Furniture every template gets (nothing here changes a page that has no byline, jump line, cut-out or drop cap):
+ * byline, jump lines, the cut-out photo with text wrap, the drop cap and the run-in dateline.
+ */
+function furnitureCss(t: Template): string {
+  const lines = t.finish?.dropcap_lines ?? 3;
+  return `
+/* ---------- newspaper furniture ---------- */
+.byline{font-size:15px;font-weight:700;line-height:1.35;margin:0 0 9px}
+.byline:empty{display:none}
+.byline[data-dl]::after{content:attr(data-dl);font-weight:500;margin-left:.6em;font-variant-caps:all-small-caps}
+.byline[data-dl]:empty::after{margin-left:0}
+.jump{font-size:14px;font-style:italic;line-height:1.3;color:#4a463e}
+.jump.to{text-align:right;margin:5px 0 0}
+.jump.from{margin:0 0 6px}
+.body p[data-dl]::before{content:attr(data-dl) " ";font-weight:700;font-variant-caps:all-small-caps}
+:lang(en) .body p[data-dl]::before{letter-spacing:.04em}
+.body .dc{float:left;font-family:${t.fonts.head};font-weight:800;font-size:calc(var(--fs) * ${(lines * 1.62 * 0.96 / 0.7).toFixed(2)});line-height:.78;margin:.06em .1em -.06em 0;padding:0;text-indent:0;color:var(--red)}
+.fig.cutout{float:left;width:calc(var(--cw,88%) + 10px);margin:0 12px 6px -10px;aspect-ratio:auto;background:none;overflow:visible;shape-image-threshold:.3;shape-margin:7px}
+.fig.cutout img{width:100%;height:auto;object-fit:fill;display:block}
+.fig.cutout.has-cap{margin-bottom:0}
+.cap.cutcap{float:left;clear:left;width:calc(var(--cw,88%) + 10px);margin:0 12px 8px -10px}
+.body [data-noedit]{user-select:none;-webkit-user-select:none}
+.story.has-cut .body p:first-of-type{text-indent:0}`;
+}
+
+/**
+ * The ruled style: print-newspaper rules and blocks, all drawn from colors.rule (and the template's tint).
+ * Hairlines between columns and between stories, a heavy rule above the lead, a double rule under the masthead,
+ * the header band of an inner page, boxed brief / pull quote / tinted panel.
+ */
+function ruledCss(t: Template): string {
+  const f = t.finish!;
+  const cg = t.gap.col_px;
+  return `
+/* ---------- ruled style (template.finish) ---------- */
+.page.ruled{--hair:${f.hair_px}px;--heavy:${f.heavy_px}px;--tint:${panelTint(t)};--cg:${cg}px}
+.ruled .mast{margin-bottom:7px}
+.ruled .strip{border-top:var(--heavy) double var(--rule);border-bottom:var(--hair) solid var(--rule);margin:0 0 20px;padding:7px 4px 6px}
+.ruled .strip.inner{border-top:var(--heavy) double var(--rule);margin-top:0;align-items:baseline}
+.ruled .strip.inner .sec{color:var(--ink);font-size:30px;letter-spacing:0;text-transform:uppercase}
+.ruled .strip.inner .folio{font-family:${t.fonts.head};font-weight:800;font-size:24px;border:var(--hair) solid var(--rule);padding:0 12px;line-height:1.5}
+.ruled .grid{align-items:stretch}
+.ruled .story{border-top:var(--hair) solid var(--rule);padding-top:10px}
+.ruled .story.lead{border-top:var(--heavy) solid var(--rule)}
+.ruled .story:not(.rs)::before{content:"";position:absolute;left:calc(var(--cg) / -2);top:0;bottom:0;width:var(--hair);background:var(--rule)}
+.ruled .head,.ruled .story:nth-child(3n+1) .head,.ruled .story:nth-child(3n) .head{color:var(--ink)}
+.ruled .kicker{display:block;background:none;color:var(--red);padding:0;margin:0 0 5px;font-size:17px;font-weight:800;text-transform:uppercase}
+:lang(en) .ruled .kicker,.ruled:lang(en) .kicker{letter-spacing:.09em}
+.ruled .sub{border-left:0;padding-left:0;font-weight:500;font-size:19px;line-height:1.38;margin:0 0 8px}
+.ruled .byline{text-transform:uppercase;font-size:14px;margin:2px 0 10px;padding-top:6px;border-top:var(--hair) solid var(--rule)}
+:lang(en) .ruled .byline,.ruled:lang(en) .byline{letter-spacing:.07em}
+.ruled .cap{border-top:var(--hair) solid var(--rule);padding-top:4px}
+.ruled .body{column-rule:var(--hair) solid var(--rule)}
+.ruled .jump{border-top:var(--hair) solid var(--rule);padding-top:4px}
+.ruled .k-side,.ruled .k-edit{background:none;padding:10px 0 0;border-top:var(--hair) solid var(--rule)}
+.ruled .k-edit .kicker{font-size:17px;background:none}
+.ruled .k-side .head{color:var(--ink)!important}
+.ruled .k-ad{border-top:0;padding-top:0}
+.ruled .k-ad::before{display:none}
+/* boxed brief: a rule all round a short story */
+.ruled .b-brief{border:calc(var(--hair) * 2) solid var(--rule);padding:12px 14px 14px}
+.ruled .b-brief::before{display:none}
+.ruled .b-brief .head{font-size:calc(min(18px + var(--span,2) * 3px, 34px) * var(--hs,1))}
+/* tinted panel: the template's own tint behind the story */
+.ruled .b-panel{background:var(--tint);padding:12px 14px 14px;border-top:var(--heavy) solid var(--rule)}
+.ruled .b-panel::before{display:none}
+/* pull quote: big quote mark, a rule above and below, centred, spans the columns it is given */
+.ruled .b-quote{border-top:var(--heavy) solid var(--rule);border-bottom:var(--heavy) solid var(--rule);padding:14px 22px 16px;text-align:center}
+.ruled .b-quote .kicker,.ruled .b-quote .byline,.ruled .b-quote .body,.ruled .b-quote .jump,.ruled .b-quote .fig,.ruled .b-quote .cap{display:none}
+.ruled .b-quote .head{font-style:italic;font-weight:700;font-size:calc(min(24px + var(--span,2) * 4px, 52px) * var(--hs,1));line-height:1.22;color:var(--ink);margin:0 0 8px}
+.ruled .b-quote .head::before{content:"\\201C";display:block;font-style:normal;font-weight:800;color:var(--red);font-size:2.6em;line-height:.62;height:.5em;margin-bottom:.12em}
+.ruled .b-quote .sub{border:0;padding:0;font-size:16px;font-weight:700;text-transform:uppercase;margin:0}
+:lang(en) .ruled .b-quote .sub,.ruled:lang(en) .b-quote .sub{letter-spacing:.07em}
+.ruled .b-quote .sub::before{content:"\\2014\\00a0"}
+`;
 }

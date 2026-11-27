@@ -3,8 +3,9 @@ import { PageDocSchema } from "@epaper/core";
 import { LayoutEngine, type FitOptions, type FitReport } from "./engine.js";
 import { defaultRatio, defaultSpan } from "./render.js";
 import { packSpans } from "./pack.js";
-import { colsForSpan, type Slot, type Template } from "./template.js";
+import { colsForSpan, dropcapAllowed, isRuled, type Slot, type Template } from "./template.js";
 import { round } from "./units.js";
+import { isTiered, planTiers, tierCols, type TierPlan } from "./tiers.js";
 
 export interface AdBooking {
   page: number; // 1-based
@@ -62,6 +63,17 @@ function kindOfHint(slot: string | undefined): PageItem["kind"] | null {
   return null;
 }
 
+/**
+ * On a ruled page the lead is the most important story that has a picture: when the top story has none, a story within 15 priority
+ * points of it that has one leads instead, so the biggest headline and the biggest photo belong to the same story. Moves one story only.
+ */
+function leadFirst(sorted: Article[]): Article[] {
+  const top = sorted[0];
+  if (!top || top.images.length || top.layout_hint?.order != null) return sorted;
+  const k = sorted.findIndex((a) => a.images.length > 0 && a.priority >= top.priority - 15);
+  return k > 0 ? [sorted[k]!, ...sorted.slice(0, k), ...sorted.slice(k + 1)] : sorted;
+}
+
 /** Stable total order: layout_hint.order (when present) first, then priority desc, newer first, id. */
 function order(a: Article, b: Article): number {
   const ha = a.layout_hint?.order, hb = b.layout_hint?.order;
@@ -81,18 +93,33 @@ function pickVariant(set: Template[], pageNo: number, storyCount: number): Templ
 }
 
 /** Fill slots by priority: first unused slot of the right kind whose word range fits. */
-function chooseSlot(kind: PageItem["kind"], w: number, hasImage: boolean, used: Set<string>, t: Template): Slot | null {
-  const cand = t.slots.filter((s) => s.kind === kind && !used.has(s.id) && w >= s.words_min && w <= s.words_max && (!hasImage || s.image || kind !== "story"));
+function chooseSlot(kind: PageItem["kind"], w: number, hasImage: boolean, used: Set<string>, t: Template, rank = 1): Slot | null {
+  const tiered = kind === "story" && t.slots.some((s) => s.tier === 1);
+  // newspaper finish: the first story of the page ALWAYS gets the dominant lead slot (whatever its length); the others step down from there
+  if (tiered && rank === 0) {
+    const lead = t.slots.find((s) => s.tier === 1 && !used.has(s.id));
+    if (lead) return lead;
+  }
+  const cand = t.slots.filter((s) => s.kind === kind && !used.has(s.id) && !(tiered && s.tier === 1) && w >= s.words_min && w <= s.words_max && (!hasImage || s.image || kind !== "story"));
   return cand[0] ?? null;
 }
+/** The lead's own look (headline scale, photo ratio) on a template that has a lead slot. */
+const leadSlot = (t: Template): Slot | undefined => t.slots.find((s) => s.tier === 1);
 
-function toItem(a: Article, pageNo: number, n: number, t: Template, used: Set<string>, spanOv?: number): PageItem {
+function toItem(a: Article, pageNo: number, n: number, t: Template, used: Set<string>, spanOv?: number, tp?: TierPlan): PageItem {
+  const rank = n - 1;
+  let chosen: Slot | null = null;
   const w = words(a);
   const hinted = kindOfHint(a.layout_hint?.slot);
   const kind: PageItem["kind"] = hinted && hinted !== "ad" ? hinted : "story";
   const hasImage = a.images.length > 0;
   let slot: string, span: number, cols: number;
-  if (spanOv != null && !(a.layout_hint && hinted)) {
+  if (tp && kind === "story" && !(a.layout_hint && hinted)) {
+    // uneven layout: width, headline scale and photo ratio come from the story's tier (see tiers.ts); a repair may override the width
+    span = Math.min(t.columns, Math.max(1, spanOv ?? tp.span));
+    slot = `story_col_span-${span}-${n}`; cols = tierCols(span, t);
+    chosen = { id: slot, span: tp.span, cols: tp.cols, kind: "story", words_min: 0, words_max: 9999, image: true, hs: tp.hs, ratio: tp.ratio, tier: tp.tier };
+  } else if (spanOv != null && !(a.layout_hint && hinted)) {
     span = Math.min(t.columns, Math.max(1, spanOv));
     slot = `story_col_span-${span}-${n}`; cols = colsForSpan(span, t);
   } else if (a.layout_hint && hinted) {
@@ -100,8 +127,8 @@ function toItem(a: Article, pageNo: number, n: number, t: Template, used: Set<st
     span = Math.min(t.columns, Math.max(1, a.layout_hint.span || defaultSpan({ kind, slot }, t.columns)));
     cols = colsForSpan(span, t);
   } else {
-    const s = chooseSlot(kind, w, hasImage, used, t);
-    if (s) { slot = s.id; span = s.span; cols = s.cols; used.add(s.id); }
+    const s = chooseSlot(kind, w, hasImage, used, t, rank);
+    if (s) { slot = s.id; span = s.span; cols = s.cols; used.add(s.id); chosen = s; }
     else {
       span = w < 70 ? 2 : w < 160 ? 3 : w < 280 ? 4 : 5;
       span = Math.min(t.columns, Math.max(1, Math.round((span * t.columns) / 8)));
@@ -118,10 +145,16 @@ function toItem(a: Article, pageNo: number, n: number, t: Template, used: Set<st
     span,
     cols,
     hs: 1,
-    text: { kicker: a.kicker ?? null, head: a.headline, sub: a.subhead ?? null, body: a.body.map((b) => b.text) },
+    text: {
+      kicker: a.kicker ?? null, head: a.headline, sub: a.subhead ?? null, body: a.body.map((b) => b.text),
+      ...(a.byline ? { byline: a.byline } : {}), ...(a.dateline ? { dateline: a.dateline } : {}),
+    },
     styles: { head: t.styles.head, sub: t.styles.sub, body: t.styles.body },
   };
-  if (img) item.image = { asset_id: img.asset_id, ratio: defaultRatio(kind, span), cutout: false, focal: [0.5, 0.4] };
+  if (chosen?.hs) item.hs = chosen.hs;
+  if (img) item.image = { asset_id: img.asset_id, ratio: chosen?.ratio ?? defaultRatio(kind, span), cutout: false, focal: [0.5, 0.4] };
+  // the lead of a ruled page opens with a drop cap where the script allows it
+  if (rank === 0 && kind === "story" && isRuled(t) && dropcapAllowed(a.body[0]?.text ?? "", t)) item.dropcap = true;
   return item;
 }
 
@@ -135,7 +168,8 @@ function finishItems(items: PageItem[], t: Template): PageItem[] {
       ...it,
       span,
       cols: stretched && it.cols === colsForSpan(it.span ?? span, t) ? colsForSpan(span, t) : Math.min(it.cols ?? colsForSpan(span, t), span),
-      ...(it.image ? { image: { ...it.image, ratio: defaultRatio(it.kind, span) } } : {}),
+      // the ratio the story's slot or tier gave it holds while the row packer leaves its width alone; otherwise the prototype default for the width
+      ...(it.image ? { image: { ...it.image, ratio: !stretched && it.kind !== "ad" ? it.image.ratio : defaultRatio(it.kind, span) } } : {}),
     };
   });
 }
@@ -192,6 +226,10 @@ export function partitionQueue(units: readonly number[], sections: readonly stri
 
 /** Penalty of one page for the search: 0 inside the band, growing below the target and steeply on overflow. */
 const penalty = (fill: number, target: number): number => (fill > 1 ? 1 + 20 * (fill - 1) : fill < target ? (target - fill) * 2 : 0);
+/** Empty paper under short stories of a stretched row: more than 3 % of the sheet counts against a ruled page. */
+const holePenalty = (hole_pct: number | undefined): number => Math.max(0, (hole_pct ?? 0) - 3) * 0.06;
+/** A ruled page also prefers readable type: a little cost for every px the body size sits below the template's comfortable size. */
+const sizePenalty = (px: number, t: Template): number => Math.max(0, t.body.start_px - 1.5 - px) * 0.02;
 
 /**
  * Auto-plan: articles -> PageDocs for N pages. Deterministic (no AI, no clock, no randomness).
@@ -235,19 +273,23 @@ export async function autoPlan(
   };
   // 3: real evaluation of a page, cached
   const spanOv = new Map<string, number>(); // article id -> span chosen by the repair
+  const compact = new Map<number, number>(); // page -> how compact its ruled furniture is (0-3), raised when the page overflows
   let evaluations = 0;
-  const budget = opts.repairBudget ?? 40;
+  const budget = opts.repairBudget ?? (templates.some(isTiered) ? 40 + 15 * nPages : 40);
   type Ev = { t: Template; fit: FitReport };
   const cache = new Map<string, Ev>();
   const evalPage = async (p: number, list: Article[]): Promise<Ev> => {
-    const key = `${p}|${list.map((a) => `${a.id}:${spanOv.get(a.id) ?? ""}`).join(",")}`;
+    const key = `${p}|c${compact.get(p) ?? 0}|${list.map((a) => `${a.id}:${spanOv.get(a.id) ?? ""}`).join(",")}`;
     const hit = cache.get(key);
     if (hit) return hit;
     evaluations++;
     const section = list[0] ? sectionKey(list[0]) : "";
     const t = pickVariant([...templates], p, list.length + (opts.ads?.filter((x) => x.page === p).length ?? 0));
     const used = new Set<string>();
-    const items = list.map((a, i) => toItem(a, p, i + 1, t, used, spanOv.get(a.id)));
+    // a ruled page leads with its most important story, wherever it sat in the queue
+    const lead = isTiered(t) ? leadFirst([...list].sort(order)) : list;
+    const plan = isTiered(t) ? planTiers(lead, t, compact.get(p) ?? 0) : [];
+    const items = lead.map((a, i) => toItem(a, p, i + 1, t, used, spanOv.get(a.id), plan[i]));
     (opts.ads ?? []).filter((x) => x.page === p).forEach((ad, i) =>
       items.push({ id: `it_p${p}ad${i + 1}`, kind: "ad", slot: `adverts-${i + 1}`, span: t.columns, cols: 1, image: { asset_id: ad.asset_id, ratio: ad.ratio ?? 9, cutout: false, focal: [0.5, 0.5] } }));
     const doc = buildDoc(p, t, items, opts, section);
@@ -289,7 +331,14 @@ export async function autoPlan(
 
   const evals: Ev[] = [];
   for (let p = 1; p <= nPages; p++) evals.push(await evalPage(p, groups[p - 1]!));
-  const pen = (e: Ev, list: Article[]) => (list.length ? penalty(e.fit.fill, targetFill) : 1);
+  // ruled pages that overflow: smaller headlines and flatter photos, one step at a time, before any story is moved or cut
+  for (let i = 0; i < nPages; i++) {
+    while (isTiered(evals[i]!.t) && evals[i]!.fit.overflow && (compact.get(i + 1) ?? 0) < 3) {
+      compact.set(i + 1, (compact.get(i + 1) ?? 0) + 1);
+      evals[i] = await evalPage(i + 1, groups[i]!);
+    }
+  }
+  const pen = (e: Ev, list: Article[]) => (list.length ? penalty(e.fit.fill, targetFill) + (isTiered(e.t) && !list.some((a) => a.layout_hint && kindOfHint(a.layout_hint.slot)) ? holePenalty(e.fit.hole_pct) + sizePenalty(e.fit.body_px, e.t) : 0) : 1);
   const total = () => evals.reduce((n, e, i) => n + pen(e, groups[i]!), 0);
   const spent = () => evaluations - nPages >= budget;
   const bad = (i: number) => pen(evals[i]!, groups[i]!) > 0;
@@ -350,7 +399,9 @@ export async function autoPlan(
         // too full: widen (shorter columns); too empty: narrow (taller)
         for (const d of over ? [1, -1] : [-1, 1]) {
           const next = cur + d;
-          if (next < 2 || next > evals[i]!.t.columns || spent()) continue;
+          // the lead of a tiered page stays dominant: never narrower than 5 columns of 8 (or the same share of a narrower grid)
+          const floor = a === leadFirst([...list].sort(order))[0] && leadSlot(evals[i]!.t) ? Math.ceil(evals[i]!.t.columns * 0.6) : 2;
+          if (next < floor || next > evals[i]!.t.columns || spent()) continue;
           const old = spanOv.get(a.id);
           spanOv.set(a.id, next);
           const e = await evalPage(i + 1, list);

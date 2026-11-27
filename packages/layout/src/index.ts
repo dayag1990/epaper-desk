@@ -11,3 +11,4 @@ export * from "./dom.js";
 export * from "./engine.js";
 export * from "./autoplan.js";
 export * from "./date.js";
+export * from "./tiers.js";

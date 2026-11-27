@@ -21,7 +21,7 @@ async function dataUri(file: string, w = 1400): Promise<string> {
 
 async function shoot(eng: LayoutEngine, name: string, plan: Awaited<ReturnType<typeof autoPlan>>, arts: Article[], pages: number[]) {
   for (const p of plan.pages) {
-    console.log(name, "p" + p.doc.page.no, p.fit.fill_pct + "%", p.fit.body_px + "px", p.template.id);
+    console.log(name, "p" + p.doc.page.no, p.fit.fill_pct + "%", p.fit.body_px + "px", "holes " + p.fit.hole_pct + "%", p.template.id, p.doc.items.map((i) => i.span).join("/"));
     if (!pages.includes(p.doc.page.no)) continue;
     const png = await eng.screenshot(p.doc, p.template, arts);
     writeFileSync(join(out, `${name}-p${p.doc.page.no}-${tag}.png`), png);

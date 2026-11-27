@@ -1,6 +1,6 @@
 import { chromium, type Browser, type Page } from "playwright";
 import { LayoutSnapshotSchema, type Article, type LayoutSnapshot, type PageDoc } from "@epaper/core";
-import { domFill, domFrames, domLines, domReady, domSpaceStats, type DomLine, type RawFrame, type SpaceStat } from "./dom.js";
+import { domFill, domFrames, domHoles, domLines, domReady, domSpaceStats, type DomLine, type RawFrame, type SpaceStat } from "./dom.js";
 import { fitBodySizeAsync, lowResCheck, type FitResult } from "./fit.js";
 import { renderDocument, renderPage, type RenderOptions } from "./render.js";
 import { SERVER_FONT_BASE, installFonts } from "./fonts.js";
@@ -24,6 +24,8 @@ export interface FitReport {
   state: "ok" | "low" | "over";
   steps: number;
   low_res: LowResWarning[];
+  /** Empty paper left under short stories in stretched rows, as a % of the sheet (ruled pages; 0 when none). */
+  hole_pct?: number;
 }
 export interface FitOptions {
   /** After the text size hits its minimum and the page still overflows, make images shorter (ratio x1.2) up to this many times. 0 = off (prototype behaviour). */
@@ -160,6 +162,7 @@ export class LayoutEngine {
   private async report(doc: PageDoc, t: Template, fill: number, px: number, steps: number): Promise<FitReport> {
     const pct = Math.round(fill * 100);
     const raw = await this.page.evaluate(domFrames);
+    const hole_pct = round((await this.page.evaluate(domHoles)) * 100, 1);
     const low: LowResWarning[] = [];
     for (const fr of raw.frames) {
       if (fr.role !== "image" || !fr.natW) continue;
@@ -177,6 +180,7 @@ export class LayoutEngine {
       state: pct > 100 ? "over" : pct < 85 ? "low" : "ok",
       steps,
       low_res: low,
+      hole_pct,
     };
   }
 

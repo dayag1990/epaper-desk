@@ -28,6 +28,29 @@ export function domFill(a: FillArgs): number {
   return (sr.height / pr.width + a.padTB / a.canvas) / (a.hmm / a.wmm);
 }
 
+/**
+ * Holes: in a ruled (uneven) layout the stories of a row are stretched to the row's height, and a story whose text ends early
+ * leaves empty paper under it. Returns that empty area as a fraction of the sheet. Self-contained (serialised into Chromium).
+ */
+export function domHoles(): number {
+  const page = document.querySelector(".page") as HTMLElement | null;
+  const sheet = page?.querySelector(".sheet") as HTMLElement | null;
+  if (!page || !sheet) return 0;
+  const sr = sheet.getBoundingClientRect();
+  if (!sr.width || !sr.height) return 0;
+  let free = 0;
+  page.querySelectorAll<HTMLElement>(".story").forEach((s) => {
+    if (s.dataset.kind === "ad") return;
+    const last = s.lastElementChild;
+    if (!last) return;
+    const r = s.getBoundingClientRect();
+    const cs = getComputedStyle(s);
+    const content = last.getBoundingClientRect().bottom + parseFloat(cs.paddingBottom || "0") + parseFloat(cs.borderBottomWidth || "0");
+    free += Math.max(0, r.bottom - content) * r.width;
+  });
+  return free / (sr.width * sr.height);
+}
+
 export interface RawFrame {
   item: string;
   role: string;
