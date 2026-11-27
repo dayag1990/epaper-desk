@@ -27,6 +27,7 @@ self.addEventListener("fetch", (e) => {
   if (req.method !== "GET") return;
   const url = new URL(req.url);
   if (url.pathname.endsWith("/sw.js")) return;
+  if (url.pathname.endsWith("/events")) return; // the live stream: never cache, never hold
   if (req.mode === "navigate") {
     e.respondWith(fetch(req).catch(async () => (await caches.match("./index.html", { ignoreSearch: true })) || Response.error()));
     return;

@@ -5,6 +5,7 @@ import { audit, requireRole, WRITE_ROLES } from "../auth.js";
 import { ApiError, notFound } from "../errors.js";
 import { enqueue } from "../lib/enqueue.js";
 import { templateSet, templateSets } from "../lib/templates.js";
+import { publishEvent } from "../events.js";
 import type { App } from "./types.js";
 
 const Id = z.object({ id: z.string().uuid() });
@@ -134,6 +135,7 @@ export function editionRoutes(app: App) {
     await prisma.pageVersion.create({ data: { paper_id: p.paper_id, page_id: page.id, rev, doc: doc as any, source: "save", user_id: p.user_id } });
     await reindex(p.paper_id, page.id, doc);
     await enqueue("page.fit", p.paper_id, { page_id: page.id, rev }, `fit:${page.id}:${rev}`);
+    await publishEvent({ type: "page.updated", paper_id: p.paper_id, page_id: page.id, edition_id: page.edition_id, rev, fill: page.fit_pct ?? null, status: page.status, by: p.user_id });
     return { rev, doc, fit_pct: page.fit_pct };
   });
 
@@ -164,6 +166,7 @@ export function editionRoutes(app: App) {
     await prisma.pageVersion.create({ data: { paper_id: p.paper_id, page_id: page.id, rev, doc, source: approved ? "approve" : "reopen", user_id: p.user_id, fit_pct: page.fit_pct } });
     await audit(p.paper_id, p.user_id, approved ? "approve" : "reopen", "page", page.id, { rev: page.rev }, { rev });
     await enqueue("page.fit", p.paper_id, { page_id: page.id, rev }, `fit:${page.id}:${rev}`);
+    await publishEvent({ type: "page.updated", paper_id: p.paper_id, page_id: page.id, edition_id: page.edition_id, rev, fill: page.fit_pct ?? null, status, by: p.user_id });
     return { status, rev };
   });
 
@@ -189,6 +192,7 @@ export function editionRoutes(app: App) {
     await prisma.pageVersion.create({ data: { paper_id: p.paper_id, page_id: page.id, rev, doc, source: "restore", user_id: p.user_id } });
     await reindex(p.paper_id, page.id, doc);
     await enqueue("page.fit", p.paper_id, { page_id: page.id, rev }, `fit:${page.id}:${rev}`);
+    await publishEvent({ type: "page.updated", paper_id: p.paper_id, page_id: page.id, edition_id: page.edition_id, rev, fill: page.fit_pct ?? null, status: page.status, by: p.user_id });
     return { rev, doc };
   });
 
@@ -248,6 +252,7 @@ export function editionRoutes(app: App) {
     await audit(p.paper_id, p.user_id, "delete", "page", page.id, { no: page.no, rev: page.rev }, { rev, renumbered: moved.length });
     // measure the pages whose number changed again, so the fit numbers on the desk are true
     for (const m of moved) await enqueue("page.fit", p.paper_id, { page_id: m.id, rev: m.rev }, `fit:${m.id}:${m.rev}`);
+    await publishEvent({ type: "edition.changed", paper_id: p.paper_id, edition_id: page.edition_id });
     return { deleted: { id: page.id, no: page.no, rev }, pages: moved, kept_as_version: rev };
   });
 

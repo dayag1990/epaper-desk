@@ -2,12 +2,17 @@
 	admin off
 }
 
+# flush_interval -1: live updates (Server-Sent Events) must reach the browser at once, never wait in a buffer
 {$APP_HOST} {
-	reverse_proxy api:8100
+	reverse_proxy api:8100 {
+		flush_interval -1
+	}
 }
 
 {$OPS_HOST} {
-	reverse_proxy ops:8101
+	reverse_proxy ops:8101 {
+		flush_interval -1
+	}
 }
 
 {$READER_HOST} {
@@ -20,6 +25,15 @@
 		respond `{"ok":true}` 200
 	}
 	handle /v1/public/* {
+		reverse_proxy api:8100 {
+			flush_interval -1
+		}
+	}
+	# who is signed in on this address (the reader's top bar shows the name) and sign out; both are cookie-checked by the api
+	handle /v1/me {
+		reverse_proxy api:8100
+	}
+	handle /v1/auth/logout {
 		reverse_proxy api:8100
 	}
 	# demo only: the stand-in news site, so a tapped story opens in the owner's browser

@@ -6,9 +6,12 @@ export interface EditorConfig {
   edition?: string;
   /** First editor zoom (default 0.5). Used by tests that must look at the page at an exact zoom. */
   zoom?: number;
+  /** Where the ops desk lives (for the alert bell). Normally worked out from this page's address. */
+  opsUrl?: string;
   autosaveMs: number;
   heartbeatMs: number;
   lockPollMs: number;
+  livePollMs: number;
   retryMs: number;
 }
 declare global {
@@ -26,9 +29,12 @@ export function loadConfig(): EditorConfig {
     mockUser: injected.mockUser ?? q.get("as") ?? undefined,
     edition: injected.edition ?? q.get("edition") ?? env.VITE_EDITION ?? undefined,
     zoom: injected.zoom ?? (q.get("zoom") ? Number(q.get("zoom")) : undefined),
+    opsUrl: injected.opsUrl ?? q.get("ops") ?? undefined,
     autosaveMs: injected.autosaveMs ?? 2000, // spec: 2 s debounce
     heartbeatMs: injected.heartbeatMs ?? 120_000, // spec: 2 min heartbeat
     lockPollMs: injected.lockPollMs ?? 15_000,
+    /** Poll for other people's changes this often while the live stream is not working (spec: 15 s). */
+    livePollMs: injected.livePollMs ?? 15_000,
     retryMs: injected.retryMs ?? 5000,
   };
 }

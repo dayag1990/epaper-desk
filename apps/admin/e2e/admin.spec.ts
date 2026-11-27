@@ -186,3 +186,25 @@ test("phone width: no sideways scroll on the main screens", async ({ page }) => 
     expect(over, `${s} scrolls sideways`).toBeLessThanOrEqual(0);
   }
 });
+
+test("top bar: links to the other apps; the ops desk link and the alert bell are for owners; an alert shows once; sign out returns to the sign-in", async ({ page, request }) => {
+  await page.addInitScript(() => { (window as any).__EPAPER_LINKS__ = { ops: "http://127.0.0.1:8171/", editor: "http://127.0.0.1:8170/__editor__" }; });
+  await login(page, "owner");
+  const bar = page.getByTestId("topbar");
+  await expect(bar.getByRole("link", { name: "Admin", exact: true })).toHaveAttribute("aria-current", "page");
+  await expect(bar.getByRole("link", { name: "Editor", exact: true })).toHaveAttribute("href", "http://127.0.0.1:8170/__editor__");
+  await expect(bar.getByRole("link", { name: "Reader", exact: true })).toBeVisible();
+  await expect(bar.getByRole("link", { name: "Ops desk" })).toBeVisible();
+  await expect(page.getByTestId("who")).toHaveText("Olga Owner");
+  await page.waitForTimeout(500);
+  await request.post(`${MOCK}/__alert`, { data: { id: "api@1:fired", title: "The API needs you", text: "The API has been red for 2 minutes. Open the ops desk and press the fix button." } });
+  await expect(page.getByTestId("alert-toast")).toHaveCount(1, { timeout: 5000 });
+  await expect(page.getByTestId("alert-toast")).toContainText("The API needs you");
+  await expect(page.getByTestId("bell-count")).toHaveText("1");
+  await page.getByRole("button", { name: "Sign out" }).click();
+  await expect(page.getByRole("form", { name: "Sign in" })).toBeVisible();
+  // an editor sees neither the ops desk link nor the bell
+  await login(page, "editor");
+  await expect(page.getByTestId("topbar").getByRole("link", { name: "Ops desk" })).toHaveCount(0);
+  await expect(page.getByTestId("bell")).toHaveCount(0);
+});

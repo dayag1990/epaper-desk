@@ -11,7 +11,7 @@
     "declaration": false,
     "sourceMap": false,
     "baseUrl": ".",
-    "paths": { "@epaper/core": ["../../packages/core/src/index.ts"] }
+    "paths": { "@epaper/core": ["../../packages/core/src/index.ts"], "@epaper/theme/react": ["../../packages/theme/src/react.tsx"], "@epaper/theme": ["../../packages/theme/src/index.ts"] }
   },
   "include": ["src", "mock", "tests", "e2e", "e2e-real", "playwright.real.config.ts", "vite.config.ts", "playwright.config.ts"]
 }

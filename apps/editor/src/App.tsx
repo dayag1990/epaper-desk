@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { Article } from "@epaper/core";
+import { openStream } from "@epaper/theme";
+import { TopBar, useAlertFeed, useAppLinks } from "@epaper/theme/react";
 import type { Api } from "./api";
 import { plainError } from "./errors";
 import { PageView } from "./PageView";
 import { PaperSwitcher, goToEditionList, switchError } from "./PaperBits";
 import { PAGE_SIZES, addStory, applyTool, ensureSlot, moveTo, resizeItem, placeArticle, setCutout, setFocal, setPageSize, setPhoto, setRatio, setStatus, setBlockStyle, syncDocs, EMPTY_ASSET, type ToolAction } from "./tools";
-import type { EditorStore } from "./store";
+import { useBlockMotion } from "./motion";
+import type { EditorStore, LiveEvent } from "./store";
 import type { EditorConfig } from "./config";
 import { KEY_RUN_MS } from "./flow";
 import type { VersionRecord } from "./types";
@@ -28,6 +31,22 @@ export function App({ store, api, cfg }: { store: EditorStore; api: Api; cfg: Ed
   const pickFor = useRef<string | null>(null);
   // leaving this edition (another paper, or the edition list) asks first when there is unsaved work
   const [leave, setLeave] = useState<null | { to: string | null; busy: boolean }>(null);
+  const links = useAppLinks();
+  const isOwner = s.me?.role === "owner";
+  // owners get the ops desk's alerts (toast + bell); with the mock API only when a desk address is given
+  const feed = useAlertFeed(cfg.opsUrl ?? links.ops, isOwner && (!cfg.mockUser || !!cfg.opsUrl));
+  useBlockMotion(scroller, s.phase === "ready" && !!s.active);
+  // live updates: the server tells this page when someone (or the worker) changed a page; if the stream is blocked, look every 15 s
+  useEffect(() => {
+    if (s.phase !== "ready") return;
+    const st = openStream({
+      url: api.eventsUrl, withCredentials: true, pollMs: cfg.livePollMs,
+      poll: () => store.refreshFromServer(),
+      onStatus: (v) => store.setLive(v),
+      on: Object.fromEntries(["page.updated", "page.fit", "edition.changed", "resync"].map((t) => [t, (d: LiveEvent) => void store.onLive(d)])),
+    });
+    return () => st.close();
+  }, [s.phase === "ready", api, store, cfg.livePollMs]); // eslint-disable-line react-hooks/exhaustive-deps
   const [swErr, setSwErr] = useState<string | null>(null);
   const leaving = useRef(false); // the person already chose: no browser "leave this page?" box on top
 
@@ -107,10 +126,18 @@ export function App({ store, api, cfg }: { store: EditorStore; api: Api; cfg: Ed
 
   const unsaved = () => store.state.dirty.length > 0 && store.state.save.state !== "saved";
   /** Let go of the page lock FIRST (it belongs to the old paper), then move the session, then show the new paper's list. */
+  const SIGN_OUT = "\u0000sign-out";
   const leaveNow = async (to: string | null) => {
     setSwErr(null);
     const active = store.state.active;
     await store.releaseLock();
+    if (to === SIGN_OUT) {
+      leaving.current = true;
+      store.dispose();
+      try { await api.logout(); } catch { /* the cookie is cleared by the server; a failed call changes nothing here */ }
+      location.assign(links.admin); // the sign-in page
+      return;
+    }
     if (to) {
       try { await api.switchPaper(to); }
       catch (e) { setSwErr(switchError(e)); setLeave(null); if (active) void store.setActive(active); return; }
@@ -187,17 +214,19 @@ export function App({ store, api, cfg }: { store: EditorStore; api: Api; cfg: Ed
   const stale = s.articles.filter((a) => s.order.some((p) => s.docs[p]!.items.some((i) => i.article_id === a.id && (i.article_rev ?? 0) < a.rev)));
 
   return (
-    <div className="app">
-      <header className="top">
-        <div className="title" title={s.edition?.name}>{s.edition?.name}</div>
+    <div className="app ep-app">
+      <TopBar app="editor" user={s.me ? { name: s.me.user.name || s.me.user.email || "You", email: s.me.user.email } : null} isOwner={isOwner} feed={feed} links={links} onSignOut={() => askLeave(SIGN_OUT)}>
         <button className="btn" data-testid="editions-btn" onClick={() => askLeave(null)}>Editions</button>
         <PaperSwitcher me={s.me} onPick={(slug) => askLeave(slug)} error={swErr} />
+      </TopBar>
+      <header className="top">
+        <div className="title" title={s.edition?.name}>{s.edition?.name}</div>
         <nav className="tabs" aria-label="Pages">
           {s.order.map((p) => {
             const mm = s.meters[p];
             const pc = mm?.pct ?? s.serverFit[p] ?? null;
             return (
-              <button key={p} data-testid={`page-tab-${s.nos[p]}`} className={`tab ${p === pid ? "on" : ""} ${mm ? mm.state : ""}`} onClick={() => void store.setActive(p)}>
+              <button key={p} data-testid={`page-tab-${s.nos[p]}`} className={`tab ${p === pid ? "on" : ""} ${mm ? mm.state : s.fitState[p] ?? ""}`} data-pct={pc ?? ""} onClick={() => void store.setActive(p)}>
                 Page {s.nos[p]}{pc != null && <small> {pc}%</small>}{s.docs[p]!.status !== "draft" && <small> · {s.docs[p]!.status}</small>}
               </button>
             );
@@ -219,11 +248,25 @@ export function App({ store, api, cfg }: { store: EditorStore; api: Api; cfg: Ed
         </div>
       )}
       {s.save.state === "offline" && <div className="banner warn" role="alert">Can't reach the server. Keep going: every word is kept on this device and saves by itself when it is back.</div>}
+      {pid && s.remote[pid] != null && (
+        <div className="banner warn" role="alert" data-testid="remote-banner">
+          Someone changed this page. Your changes here are not saved over theirs.{" "}
+          <button className="btn" data-testid="remote-reload" onClick={() => void store.reviewRemote(pid)}>Reload to compare</button>
+        </div>
+      )}
+      {s.listChanged && (
+        <div className="banner" role="status" data-testid="list-banner">
+          The pages of this edition changed (a page was added, removed or planned again).{" "}
+          <button className="btn" data-testid="list-reload" onClick={() => { void store.saveNow().finally(() => location.reload()); }}>Reload</button>
+        </div>
+      )}
 
       <div className="bar2">
         <span className={`meter ${m?.state ?? ""}`} data-testid="fill-meter" data-refits={s.refits} data-pct={m?.pct ?? ""} data-zoom={zoom.toFixed(4)} role="status">
           {m ? m.label : fillPct != null ? `${fillPct}% full` : "Measuring…"}
+          {fillPct != null && <span className="fillbar" aria-hidden="true"><i style={{ width: `${Math.max(0, Math.min(100, m?.pct ?? fillPct))}%` }} /></span>}
         </span>
+        {s.live === "down" && <span className="meter" data-testid="live-down" title="Changes by other people show up within 15 seconds">Live updates paused</span>}
         {m?.lowRes.map((t) => <span key={t} className="meter over">{t}</span>)}
         <span className="grp">
           <button className="btn" onClick={() => setZoom((z) => Math.max(0.15, z / 1.25))} aria-label="Zoom out">−</button>
@@ -335,9 +378,9 @@ export function App({ store, api, cfg }: { store: EditorStore; api: Api; cfg: Ed
         <div className="modal" role="alertdialog" aria-labelledby="lv-t" data-testid="leave-warning">
           <div className="card">
             <h3 id="lv-t">You have changes that are not saved yet</h3>
-            <p>{leave.to ? "Switching paper closes this edition." : "Going to the edition list closes this edition."} Save first, or leave now: whatever is not saved stays on this device and comes back the next time you open this page.</p>
+            <p>{leave.to === SIGN_OUT ? "Signing out closes this edition." : leave.to ? "Switching paper closes this edition." : "Going to the edition list closes this edition."} Save first, or leave now: whatever is not saved stays on this device and comes back the next time you open this page.</p>
             <div className="row">
-              <button className="btn y" disabled={leave.busy} onClick={() => void saveAndLeave()} autoFocus>{leave.busy ? "Saving…" : "Save, then go"}</button>
+              <button className="btn y" disabled={leave.busy} onClick={() => void saveAndLeave()} autoFocus>{leave.busy ? "Saving…" : leave.to === SIGN_OUT ? "Save, then sign out" : "Save, then go"}</button>
               <button className="btn" disabled={leave.busy} onClick={() => { const to = leave.to; setLeave(null); void leaveNow(to); }}>Leave without saving</button>
               <button className="btn" disabled={leave.busy} onClick={() => setLeave(null)}>Stay here</button>
             </div>

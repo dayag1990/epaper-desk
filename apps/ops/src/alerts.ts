@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import YAML from "yaml";
@@ -5,6 +6,7 @@ import { z } from "zod";
 import { evalExpr, MissingMetric, type Metrics } from "./expr.js";
 import type { Snapshot } from "./health.js";
 import { JsonFile } from "./store.js";
+import type { AlertHub } from "./alertlog.js";
 
 const Rule = z.object({
   id: z.string(),
@@ -12,6 +14,8 @@ const Rule = z.object({
   expr: z.string().optional(), // metric rules: fires while TRUE
   for_s: z.number().min(0).default(0),
   message: z.string(),
+  /** short headline for the toast and the alert list; falls back to the first sentence of the message */
+  title: z.string().optional(),
   on_missing: z.enum(["fire", "ignore"]).default("ignore"), // metric not readable: backups say fire, API-fed ones ignore
 });
 export type AlertRule = z.infer<typeof Rule>;
@@ -63,31 +67,37 @@ export class AlertSender {
 
 interface AlertMem { since: number; notified: number | null }
 
+const firstSentence = (t: string) => (t.split(/(?<=[.!?])\s/)[0] ?? t).replace(/\.$/, "");
+
 export class AlertEngine {
   private mem: JsonFile<Record<string, AlertMem>>;
-  constructor(private o: { rules: () => { repeat_s: number; rules: AlertRule[] }; sender: AlertSender; stateDir: string; link: string; now?: () => number }) {
+  constructor(private o: { rules: () => { repeat_s: number; rules: AlertRule[] }; hub: AlertHub; stateDir: string; link: string; now?: () => number }) {
     this.mem = new JsonFile(path.join(o.stateDir, "alerts-state.json"), () => ({}));
   }
   private now() { return (this.o.now ?? Date.now)(); }
 
-  private conditions(snap: Snapshot): { key: string; firing: boolean; text: string; for_s: number }[] {
-    const out: { key: string; firing: boolean; text: string; for_s: number }[] = [];
+  private conditions(snap: Snapshot): { key: string; firing: boolean; text: string; title: string; for_s: number }[] {
+    const out: { key: string; firing: boolean; text: string; title: string; for_s: number }[] = [];
     const { rules } = this.o.rules();
     for (const r of rules) {
       if (r.kind === "service_red") {
         for (const s of snap.services) {
           if (["disk", "memory", "queue-depth", "dead-letter", "backups", "last-backup-age", "last-drill", "certificate"].includes(s.name)) continue; // those have their own rules
-          out.push({ key: `${r.id}:${s.name}`, firing: s.state === "red", for_s: r.for_s, text: `${r.message.replace("{service}", s.title)} ${s.last_error ?? ""}`.trim() });
+          out.push({ key: `${r.id}:${s.name}`, firing: s.state === "red", for_s: r.for_s, title: r.title?.replace("{service}", s.title) ?? `${s.title} needs you`, text: `${r.message.replace("{service}", s.title)} ${s.last_error ?? ""}`.trim() });
         }
       } else if (r.expr) {
         let firing = false;
         try { firing = evalExpr(r.expr, snap.metrics as Metrics); } catch (e) { firing = e instanceof MissingMetric && r.on_missing === "fire"; }
-        out.push({ key: r.id, firing, for_s: r.for_s, text: r.message });
+        out.push({ key: r.id, firing, for_s: r.for_s, title: r.title ?? firstSentence(r.message), text: r.message });
       }
     }
     return out;
   }
 
+  /**
+   * Looks at the lights. Every change goes to ONE place, the alert hub (log + screens + phone), once per id:
+   * `<alert>@<when it started>:fired`, `...:remind:<time>` every repeat_s while it stays broken, `...:resolved`.
+   */
   async tick(snap: Snapshot): Promise<{ sent: string[] }> {
     const t = this.now(), { repeat_s } = this.o.rules();
     const mem = this.mem.read();
@@ -99,12 +109,24 @@ export class AlertEngine {
         const cur = mem[c.key]!;
         const due = t - cur.since >= c.for_s * 1000;
         if (due && (cur.notified === null || t - cur.notified >= repeat_s * 1000)) {
-          const text = `RED: ${c.text}\nOpen the ops desk and press the fix button: ${this.o.link}`;
-          await this.o.sender.send(text);
+          const episode = `${c.key}@${cur.since}`;
+          const first = cur.notified === null;
+          await this.o.hub.emit({
+            id: first ? `${episode}:fired` : `${episode}:remind:${t}`, episode, kind: first ? "fired" : "reminder", key: c.key, title: c.title,
+            text: `${c.text} Open the ops desk and press the fix button.`,
+            phone: `RED: ${c.text}\nOpen the ops desk and press the fix button: ${this.o.link}`,
+          });
           cur.notified = t; sent.push(c.key);
         }
       } else if (m) {
-        if (m.notified !== null) { await this.o.sender.send(`FIXED: ${c.text.split(".")[0]} is fine again.`); sent.push(`fixed:${c.key}`); }
+        if (m.notified !== null) {
+          const episode = `${c.key}@${m.since}`;
+          await this.o.hub.emit({
+            id: `${episode}:resolved`, episode, kind: "resolved", key: c.key, title: `${c.title.replace(/ needs you$/, "")}: fixed`,
+            text: `${c.text.split(".")[0]} is fine again.`, phone: `FIXED: ${c.text.split(".")[0]} is fine again.`,
+          });
+          sent.push(`fixed:${c.key}`);
+        }
         delete mem[c.key];
       }
     }
@@ -113,7 +135,9 @@ export class AlertEngine {
   }
 
   async test(): Promise<{ via: string; message: string }> {
-    const r = await this.o.sender.send(`TEST: the ops desk can reach you. Nothing is wrong. ${this.o.link}`);
-    return { via: r.via, message: r.via === "telegram" ? "A test message was sent to Telegram." : `Telegram is not set up${r.telegram_error ? ` or failed (${r.telegram_error})` : ""}, so the test line was written to the alerts file instead.` };
+    const t = this.now();
+    const r = await this.o.hub.emit({ id: `test@${t}:${crypto.randomBytes(4).toString("hex")}:test`, episode: `test@${t}`, kind: "test", key: "test", title: "Test alert", text: "The ops desk can reach you. Nothing is wrong.", phone: `TEST: the ops desk can reach you. Nothing is wrong. ${this.o.link}` });
+    const via = r?.via ?? "file";
+    return { via, message: via === "telegram" ? "A test message was sent to Telegram." : `Telegram is not set up${r?.telegram_error ? ` or failed (${r.telegram_error})` : ""}, so the test line was written to the alerts file instead.` };
   }
 }

@@ -3,11 +3,15 @@ import crypto from "node:crypto";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import { DbRestoreBodySchema, FilesRestoreBodySchema, JobsRetryBodySchema, LogsQuerySchema, OpsStatusSchema, type OpsStatus } from "@epaper/core";
 import { z } from "zod";
+import { SSO_COOKIE, cookieFrom, ssoClearCookie, ssoEnabled, verifySso, type SsoClaims } from "@epaper/sso";
+import { resolveLinks } from "@epaper/theme";
+import { browserModule, themeCss } from "@epaper/theme/node";
 import { AlertEngine, AlertSender, FileChannel, TelegramChannel, loadAlertRules, type AlertChannel } from "./alerts.js";
+import { AlertHub } from "./alertlog.js";
 import type { ApiClient } from "./api-client.js";
 import { Auth, ensureSetupCode } from "./auth.js";
 import { BackupError, type BackupDriver } from "./backup.js";
-import { APP_CSS, APP_JS } from "./assets.js";
+import { APP_CSS, APP_JS, BOOT_JS } from "./assets.js";
 import type { Config } from "./config.js";
 import { DockerError, type DockerDriver } from "./docker.js";
 import { Fixes, OpsError } from "./fixes.js";
@@ -30,7 +34,7 @@ const parseCookie = (h: string | undefined, name: string) => h?.split(";").map((
 
 export function buildApp(d: AppDeps) {
   const { cfg } = d;
-  const app: FastifyInstance = Fastify({ logger: false, trustProxy: true, bodyLimit: 64 * 1024 });
+  const app: FastifyInstance = Fastify({ logger: false, trustProxy: true, bodyLimit: 64 * 1024, forceCloseConnections: true }); // open alert streams must not hold up a restart
   const now = d.now ?? Date.now;
   const auth = new Auth(cfg.stateDir, now);
   const log = new OpsLog(cfg.stateDir);
@@ -40,7 +44,9 @@ export function buildApp(d: AppDeps) {
   const fixes = new Fixes({ cfg, docker: d.docker, backup: d.backup, api: d.api, health, releases, log, services, pollMs: d.pollMs, defer: (fn) => void setTimeout(fn, 800) });
   const tg = d.telegram !== undefined ? d.telegram : cfg.telegramToken && cfg.telegramChat ? new TelegramChannel(cfg.telegramToken, cfg.telegramChat) : null;
   const sender = new AlertSender(tg, new FileChannel(cfg.alertsLogFile, now));
-  const alerts = new AlertEngine({ rules: () => loadAlertRules(cfg.alertsFile), sender, stateDir: cfg.stateDir, link: cfg.opsHost ? `https://${cfg.opsHost}/` : "the ops desk", now });
+  // ONE alerts stream: the engine hands every alert to the hub; the hub logs it, shows it on screens and sends it to the phone, once per id.
+  const hub = new AlertHub({ stateDir: cfg.stateDir, sender, link: cfg.opsHost ? `https://${cfg.opsHost}/` : "/", now });
+  const alerts = new AlertEngine({ rules: () => loadAlertRules(cfg.alertsFile), hub, stateDir: cfg.stateDir, link: cfg.opsHost ? `https://${cfg.opsHost}/` : "the ops desk", now });
   const setupCode = ensureSetupCode(cfg.stateDir, cfg.setupCode);
   const loginLimit = new RateLimiter(10, 60_000, now);
   const apiLimit = new RateLimiter(600, 60_000, now);
@@ -54,24 +60,53 @@ export function buildApp(d: AppDeps) {
     return memo.p;
   };
 
+  // ---------- the shared newsroom login (SSO): only a signed statement from the API, checked here with no call to anything ----------
+  const ssoOn = ssoEnabled(cfg.ssoSecret);
+  /** The signed-in newsroom person, only if they are an owner (and on the allow-list, if there is one). */
+  const ssoClaims = (req: FastifyRequest): SsoClaims | null => {
+    if (!ssoOn) return null;
+    const c = verifySso(cfg.ssoSecret, cookieFrom(req.headers.cookie, SSO_COOKIE), now());
+    if (!c || !c.owner) return null;
+    if (cfg.ownerEmails.length && !cfg.ownerEmails.includes(c.email.toLowerCase())) return null;
+    return c;
+  };
+  const linksFor = (req: FastifyRequest) => {
+    const host = String(req.headers["x-forwarded-host"] ?? req.headers.host ?? "localhost").split(",")[0]!.trim();
+    let u: URL; try { u = new URL(`http://${host}`); } catch { u = new URL("http://localhost"); }
+    return resolveLinks({ protocol: cfg.secureCookie ? "https:" : "http:", hostname: u.hostname, port: u.port }, cfg.links);
+  };
+  const sessionOk = (req: FastifyRequest): boolean => {
+    const info = auth.sessionInfo(token(req));
+    if (!info.ok) return false;
+    if (info.sso) { const c = ssoClaims(req); return !!c && c.uid === info.sso; } // a session that rests on the newsroom login ends with it
+    return true;
+  };
+  const chrome = (req: FastifyRequest, extra: Partial<ui.Chrome> = {}): ui.Chrome => {
+    const c = ssoClaims(req);
+    const info = auth.sessionInfo(token(req));
+    return { links: linksFor(req), user: info.sso && c ? { name: c.email, email: c.email } : { name: "Desk login" }, ...extra };
+  };
+  const cookieOpts = () => ({ secure: cfg.secureCookie, domain: cfg.ssoCookieDomain });
+
   app.addContentTypeParser("application/x-www-form-urlencoded", { parseAs: "string" }, (_r, body, done) => done(null, Object.fromEntries(new URLSearchParams(body as string))));
-  app.addHook("onSend", async (_req, reply) => {
+  app.addHook("onSend", async (req, reply) => {
     reply.header("cache-control", "no-store");
     reply.header("x-content-type-options", "nosniff");
     reply.header("referrer-policy", "no-referrer");
-    reply.header("content-security-policy", "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'");
+    const api = (() => { try { return new URL(linksFor(req).editor).origin; } catch { return ""; } })(); // the one other place the page may call: the API's sign-out, fire and forget
+    reply.header("content-security-policy", `default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' ${api}; form-action 'self'; frame-ancestors 'none'; base-uri 'none'`);
   });
 
-  const OPEN = new Set(["/healthz", "/assets/app.css", "/assets/app.js", "/login", "/setup", "/setup/confirm"]);
+  const OPEN = new Set(["/healthz", "/assets/app.css", "/assets/app.js", "/assets/theme.css", "/assets/boot.js", "/assets/theme/live.js", "/assets/theme/vanilla.js", "/login", "/logout", "/setup", "/setup/confirm", "/stepup"]);
   const token = (req: FastifyRequest) => parseCookie(req.headers.cookie, "ops_session");
   const isApiPath = (u: string) => u.startsWith("/ops/");
 
   app.addHook("onRequest", async (req, reply) => {
     const p = req.url.split("?")[0]!;
-    if (OPEN.has(p)) return;
-    if (!auth.verifySession(token(req))) {
+    if (OPEN.has(p) || p === "/ops/alerts/stream") return; // the stream checks for itself: it answers browsers on other pages (CORS)
+    if (!sessionOk(req)) {
       if (isApiPath(p)) return reply.code(401).send({ ok: false, error: "Please log in first. Open the desk in your browser and log in with your password and 6-digit code." });
-      return reply.redirect("/login");
+      return reply.redirect(ssoClaims(req) && auth.hasAccount() ? "/stepup" : "/login");
     }
     if (!apiLimit.take(`ip:${req.ip}`)) return reply.code(429).header("retry-after", "30").send({ ok: false, error: "Too many presses too fast. Wait half a minute." });
     if (req.method === "POST" && p !== "/logout" && req.headers["x-ops"] !== "1") return reply.code(403).send({ ok: false, error: "This request did not come from the desk page. Reload the desk and press the button again." });
@@ -86,7 +121,7 @@ export function buildApp(d: AppDeps) {
     else if (err.statusCode && err.statusCode < 500) { status = err.statusCode; msg = "The desk did not understand that request. Reload the page and try again."; }
     else msg = `The desk hit a problem it did not expect (${maskSecrets(err.message).slice(0, 200)}). Press the button once more; if it fails again, look at History.`;
     if (isApiPath(req.url) || req.headers.accept?.includes("json")) return reply.code(status).send({ ok: false, error: msg, ...extra });
-    return reply.code(status).type("text/html").send(ui.errorPage(msg));
+    return reply.code(status).type("text/html").send(ui.errorPage(msg, chrome(req), sessionOk(req)));
   });
 
   const html = (reply: FastifyReply, body: string, code = 200) => reply.code(code).type("text/html; charset=utf-8").send(body);
@@ -97,69 +132,125 @@ export function buildApp(d: AppDeps) {
   app.get("/healthz", async () => ({ ok: true }));
   app.get("/assets/app.css", async (_q, r) => r.type("text/css").send(APP_CSS));
   app.get("/assets/app.js", async (_q, r) => r.type("application/javascript").send(APP_JS));
+  // the shared theme and the alert bell/toast code come from @epaper/theme (one copy for all four apps)
+  app.get("/assets/theme.css", async (_q, r) => r.type("text/css").send(themeCss()));
+  app.get("/assets/boot.js", async (_q, r) => r.type("application/javascript").send(BOOT_JS));
+  app.get("/assets/theme/live.js", async (_q, r) => r.type("application/javascript").send(browserModule("live")));
+  app.get("/assets/theme/vanilla.js", async (_q, r) => r.type("application/javascript").send(browserModule("vanilla")));
 
   app.get("/login", async (req, reply) => {
     if (!auth.hasAccount()) return reply.redirect("/setup");
-    return html(reply, ui.loginPage());
+    const q = req.query as { out?: string };
+    const c = ssoClaims(req);
+    // signed out just now: also sign the browser out of the API, in the background (the desk never waits for it)
+    const extra: Partial<ui.Chrome> = q.out && ssoOn ? { apiLogoutUrl: `${linksFor(req).editor}v1/auth/logout` } : {};
+    return html(reply, ui.loginPage(chrome(req, extra), q.out ? "You are signed out of the desk and the newsroom apps." : undefined, c ? { email: c.email } : ssoOn ? "none" : null));
   });
   app.post("/login", async (req, reply) => {
     const b = (req.body ?? {}) as { password?: string; code?: string };
     const wantsJson = req.headers.accept?.includes("json");
-    const fail = (code: number, msg: string) => (wantsJson ? reply.code(code).send({ ok: false, error: msg }) : html(reply, ui.loginPage(msg), code));
+    const fail = (code: number, msg: string) => (wantsJson ? reply.code(code).send({ ok: false, error: msg }) : html(reply, ui.loginPage(chrome(req), msg, null), code));
     if (!loginLimit.take(`login:${req.ip}`)) return fail(429, `Too many tries from this phone. Wait ${loginLimit.retryAfterS(`login:${req.ip}`)} seconds.`);
     const r = auth.login(String(b.password ?? ""), String(b.code ?? ""));
-    log.add({ who: "login", action: "login", result: r.ok ? "ok" : "refused", note: r.ok ? undefined : r.reason });
+    log.add({ who: "login", action: "login (desk's own login)", result: r.ok ? "ok" : "refused", note: r.ok ? undefined : r.reason });
     if (!r.ok) return fail(r.reason === "locked" ? 423 : 401, r.message);
     reply.header("set-cookie", `ops_session=${r.token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${12 * 3600}${cfg.secureCookie ? "; Secure" : ""}`);
     return wantsJson ? { ok: true } : reply.redirect("/");
   });
+  // One step after the newsroom login: only the 6-digit code, once per ops session. The desk's own login stays as break-glass.
+  app.get("/stepup", async (req, reply) => {
+    const c = ssoClaims(req);
+    if (!c || !auth.hasAccount()) return reply.redirect("/login");
+    return html(reply, ui.stepUpPage(chrome(req), c.email));
+  });
+  app.post("/stepup", async (req, reply) => {
+    const c = ssoClaims(req);
+    if (!c || !auth.hasAccount()) return reply.redirect("/login");
+    const wantsJson = req.headers.accept?.includes("json");
+    const fail = (code: number, msg: string) => (wantsJson ? reply.code(code).send({ ok: false, error: msg }) : html(reply, ui.stepUpPage(chrome(req), c.email, msg), code));
+    if (!loginLimit.take(`login:${req.ip}`)) return fail(429, `Too many tries from this phone. Wait ${loginLimit.retryAfterS(`login:${req.ip}`)} seconds.`);
+    const r = auth.stepUp(String(((req.body ?? {}) as { code?: string }).code ?? ""), c.uid);
+    log.add({ who: c.email, action: "login (newsroom login + code)", result: r.ok ? "ok" : "refused", note: r.ok ? undefined : r.reason });
+    if (!r.ok) return fail(r.reason === "locked" ? 423 : 401, r.message);
+    reply.header("set-cookie", `ops_session=${r.token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${12 * 3600}${cfg.secureCookie ? "; Secure" : ""}`);
+    return wantsJson ? { ok: true } : reply.redirect("/");
+  });
+  // Sign out of the desk AND the newsroom apps: the desk's cookie, the shared sign-in cookie, and the API's session cookie
+  // (they share the browser's cookie jar on one host); the login page then tells the API too, in the background.
   app.get("/logout", async (req, reply) => {
     auth.logout(token(req));
-    reply.header("set-cookie", `ops_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${cfg.secureCookie ? "; Secure" : ""}`);
-    return reply.redirect("/login");
+    const secure = cfg.secureCookie ? "; Secure" : "";
+    reply.header("set-cookie", `ops_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secure}`);
+    reply.header("set-cookie", ssoClearCookie(cookieOpts()));
+    if (cfg.ssoCookieDomain) reply.header("set-cookie", ssoClearCookie({ secure: cfg.secureCookie }));
+    reply.header("set-cookie", `epaper_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${secure}`);
+    return reply.redirect("/login?out=1");
   });
 
   // first-time enrolment: only while no login exists, and only with the setup code
-  app.get("/setup", async (_q, reply) => (auth.hasAccount() ? reply.redirect("/login") : html(reply, ui.setupPage())));
+  app.get("/setup", async (req, reply) => (auth.hasAccount() ? reply.redirect("/login") : html(reply, ui.setupPage(chrome(req)))));
   app.post("/setup", async (req, reply) => {
     if (auth.hasAccount()) return reply.redirect("/login");
     const b = (req.body ?? {}) as { setup?: string; password?: string };
-    if (!loginLimit.take(`setup:${req.ip}`)) return html(reply, ui.setupPage("Too many tries. Wait a minute."), 429);
+    if (!loginLimit.take(`setup:${req.ip}`)) return html(reply, ui.setupPage(chrome(req), "Too many tries. Wait a minute."), 429);
     const a = Buffer.from(String(b.setup ?? "")), c = Buffer.from(setupCode);
-    if (a.length !== c.length || !crypto.timingSafeEqual(a, c)) return html(reply, ui.setupPage("That setup code is wrong."), 401);
+    if (a.length !== c.length || !crypto.timingSafeEqual(a, c)) return html(reply, ui.setupPage(chrome(req), "That setup code is wrong."), 401);
     try {
       const s = auth.beginSetup(String(b.password ?? ""));
       const sid = crypto.randomBytes(18).toString("base64url");
       setupSessions.set(sid, now() + 15 * 60_000);
       reply.header("set-cookie", `ops_setup=${sid}; HttpOnly; SameSite=Strict; Path=/setup; Max-Age=900${cfg.secureCookie ? "; Secure" : ""}`);
-      return html(reply, ui.setupStep2(s.secret, s.otpauth, s.backupCodes));
-    } catch (e) { return html(reply, ui.setupPage((e as Error).message), 400); }
+      return html(reply, ui.setupStep2(chrome(req), s.secret, s.otpauth, s.backupCodes));
+    } catch (e) { return html(reply, ui.setupPage(chrome(req), (e as Error).message), 400); }
   });
   app.post("/setup/confirm", async (req, reply) => {
     const sid = parseCookie(req.headers.cookie, "ops_setup");
-    if (auth.hasAccount() || !sid || (setupSessions.get(sid) ?? 0) < now()) return html(reply, ui.setupPage("Start the setup again."), 400);
-    if (!loginLimit.take(`setup:${req.ip}`)) return html(reply, ui.setupPage("Too many tries. Wait a minute."), 429);
+    if (auth.hasAccount() || !sid || (setupSessions.get(sid) ?? 0) < now()) return html(reply, ui.setupPage(chrome(req), "Start the setup again."), 400);
+    if (!loginLimit.take(`setup:${req.ip}`)) return html(reply, ui.setupPage(chrome(req), "Too many tries. Wait a minute."), 429);
     const code = String(((req.body ?? {}) as { code?: string }).code ?? "");
-    if (!auth.confirmSetup(code)) return html(reply, ui.setupPage("That code was wrong, so setup was not finished. Start again; new backup codes will be made."), 400);
+    if (!auth.confirmSetup(code)) return html(reply, ui.setupPage(chrome(req), "That code was wrong, so setup was not finished. Start again; new backup codes will be made."), 400);
     setupSessions.delete(sid);
     log.add({ who: "setup", action: "login created", result: "ok" });
     return reply.redirect("/login");
   });
 
   // ---------- pages ----------
-  app.get("/", async (_q, reply) => {
+  app.get("/", async (req, reply) => {
     const snap = await snapshot(true);
-    return html(reply, ui.dashboard({ snap, releases: await releases.list().catch(() => []), current: releases.current(), alertChannel: sender.channel }));
+    return html(reply, ui.dashboard({ snap, releases: await releases.list().catch(() => []), current: releases.current(), alertChannel: sender.channel }, chrome(req)));
   });
   app.get("/ui/lights", async (_q, reply) => html(reply, ui.lightsFragment(await snapshot())));
   app.get("/logs/:name", async (req, reply) => {
     const { name } = req.params as { name: string };
     const { tail } = LogsQuerySchema.parse(req.query);
     const r = await fixes.logs(name, Math.min(tail, 2000));
-    return html(reply, ui.logsPage(name, r.text, r.tail));
+    return html(reply, ui.logsPage(name, r.text, r.tail, chrome(req)));
   });
-  app.get("/disk", async (_q, reply) => { const p = await fixes.planClear(); return html(reply, ui.diskPage(p.items, p.total_bytes, p.kept)); });
-  app.get("/history", async (_q, reply) => html(reply, ui.historyPage(log.recent(200))));
+  app.get("/disk", async (req, reply) => { const p = await fixes.planClear(); return html(reply, ui.diskPage(p.items, p.total_bytes, p.kept, chrome(req))); });
+  app.get("/history", async (req, reply) => html(reply, ui.historyPage(log.recent(200), chrome(req))));
+  app.get("/alerts", async (req, reply) => html(reply, ui.alertsPage(hub.recent(100), sender.channel, chrome(req))));
+  app.get("/ops/alerts", async () => ({ alerts: hub.recent(100), firing: hub.firing(), channel: sender.channel }));
+
+  // The alert stream for toasts and the bell: this desk's own pages (desk session) and the editor and admin pages of an
+  // owner (the shared sign-in cookie), which are other origins, so only the known app origins get CORS headers.
+  app.get("/ops/alerts/stream", async (req, reply) => {
+    const origin = req.headers.origin;
+    const own = linksFor(req).ops.replace(/\/$/, "");
+    const cors: Record<string, string> = origin && cfg.appOrigins.includes(origin) ? { "access-control-allow-origin": origin, "access-control-allow-credentials": "true", vary: "Origin" } : {};
+    if (origin && !cors["access-control-allow-origin"] && origin !== own && origin !== `${req.protocol}://${req.headers.host}`) return reply.code(403).send({ ok: false, error: "This page is not allowed to read the desk's alerts." });
+    if (!sessionOk(req) && !ssoClaims(req)) return reply.code(401).headers(cors).send({ ok: false, error: "Please sign in first." });
+    const since = Number((req.query as { since?: string }).since ?? 0) || 0;
+    reply.hijack();
+    const res = reply.raw;
+    res.writeHead(200, { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-store, no-transform", connection: "keep-alive", "x-accel-buffering": "no", "x-content-type-options": "nosniff", ...cors });
+    const write = (t: string) => { try { res.write(t); } catch { /* closed */ } };
+    write(`retry: 3000\nevent: snapshot\ndata: ${JSON.stringify({ recent: hub.recent(30, since), firing: hub.firing(), seq: hub.lastSeq })}\n\n`);
+    const unsub = hub.subscribe((r) => write(`id: ${r.seq}\nevent: alert\ndata: ${JSON.stringify(r)}\n\n`));
+    const beat = setInterval(() => write(": ping\n\n"), 20_000);
+    const done = () => { clearInterval(beat); unsub(); };
+    req.raw.on("close", done);
+    res.on("error", done);
+  });
 
   // ---------- D10 ----------
   app.get("/ops/status", async (): Promise<OpsStatus & Record<string, unknown>> => {
@@ -211,13 +302,13 @@ export function buildApp(d: AppDeps) {
   });
   app.get("/ops/log", async (req, reply) => {
     const rows = log.recent(200);
-    if ((req.query as { html?: string }).html || req.headers.accept?.includes("text/html")) return html(reply, ui.historyPage(rows));
+    if ((req.query as { html?: string }).html || req.headers.accept?.includes("text/html")) return html(reply, ui.historyPage(rows, chrome(req)));
     return { entries: rows };
   });
-  app.get("/ops/build", async (_q, reply) => {
+  app.get("/ops/build", async (req, reply) => {
     let md: string;
-    try { md = fs.readFileSync(cfg.statusMdFile, "utf8"); } catch { return html(reply, ui.buildPage(`<div class="card red">The build clock file (${esc(cfg.statusMdFile)}) is not mounted into the desk, so it cannot be shown.</div>`)); }
-    return html(reply, ui.buildPage(mdToHtml(maskSecrets(md))));
+    try { md = fs.readFileSync(cfg.statusMdFile, "utf8"); } catch { return html(reply, ui.buildPage(`<div class="card red">The build clock file (${esc(cfg.statusMdFile)}) is not mounted into the desk, so it cannot be shown.</div>`, chrome(req))); }
+    return html(reply, ui.buildPage(mdToHtml(maskSecrets(md)), chrome(req)));
   });
 
   // ---------- extra buttons ----------
@@ -228,5 +319,5 @@ export function buildApp(d: AppDeps) {
   app.get("/ops/releases", async () => ({ current: releases.current(), kept: await releases.list() }));
   app.post("/ops/alerts/test", async (req) => act(req, "test alert", undefined, async () => ({ ok: true as const, ...(await alerts.test()) })));
 
-  return { app, auth, health, fixes, alerts, log, releases, snapshot, setupCode };
+  return { app, auth, health, fixes, alerts, hub, log, releases, snapshot, setupCode };
 }

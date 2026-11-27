@@ -19,7 +19,10 @@ interface UserRec {
   lastStep: number; // newest TOTP step accepted: a code cannot be used twice
 }
 interface UsersFile { user?: UserRec }
-interface SessionsFile { secret: string; sessions: Record<string, number> }
+/** A local login is just an expiry; a session made by the shared sign-in (SSO) step-up also remembers WHOSE sign-in it rests on. */
+type SessRec = number | { exp: number; sso: string };
+const expOf = (r: SessRec | undefined) => (typeof r === "number" ? r : r?.exp ?? 0);
+interface SessionsFile { secret: string; sessions: Record<string, SessRec> }
 
 export type LoginResult =
   | { ok: true; token: string }
@@ -77,7 +80,20 @@ export class Auth {
     return true;
   }
 
+  /** The break-glass login: password + 6-digit code. Works with no API, no Postgres, no SSO secret. */
   login(password: string, code: string): LoginResult {
+    return this.attempt((u) => checkPassword(password, u.passHash), code);
+  }
+
+  /**
+   * The second factor on its own: the person is already signed in with the shared newsroom login (SSO cookie, owner), so only
+   * the 6-digit code (or a backup code) is asked, once per ops session. Same lock-out and same "a code works once" rules as the login.
+   */
+  stepUp(code: string, ssoUid: string): LoginResult {
+    return this.attempt(() => true, code, ssoUid);
+  }
+
+  private attempt(passwordOk: (u: UserRec) => boolean, code: string, ssoUid?: string): LoginResult {
     const f = this.users.read();
     const u = f.user;
     if (!u || !u.active) return { ok: false, reason: "no_account", message: "No login has been set up yet. Open the setup page first." };
@@ -86,7 +102,7 @@ export class Auth {
       const s = Math.ceil((u.lockedUntil - t) / 1000);
       return { ok: false, reason: "locked", retryAfterS: s, message: `Too many wrong tries. The login is locked for ${Math.ceil(s / 60)} more minutes. Wait, then try again.` };
     }
-    let good = checkPassword(password, u.passHash);
+    let good = passwordOk(u);
     let step: number | null = null;
     let usedBackup: string | null = null;
     const c = code.trim();
@@ -107,12 +123,12 @@ export class Auth {
       this.users.write({ user: { ...u, failed: lock ? 0 : failed, lockedUntil: lock ? t + LOCK_MS : 0 } });
       return lock
         ? { ok: false, reason: "locked", retryAfterS: LOCK_MS / 1000, message: "Too many wrong tries. The login is locked for 15 minutes. Wait, then try again." }
-        : { ok: false, reason: "wrong", message: `The password or the 6-digit code is wrong. ${MAX_WRONG - failed} tries left.` };
+        : { ok: false, reason: "wrong", message: ssoUid ? `The 6-digit code is wrong. ${MAX_WRONG - failed} tries left.` : `The password or the 6-digit code is wrong. ${MAX_WRONG - failed} tries left.` };
     }
     this.users.write({
       user: { ...u, failed: 0, lockedUntil: 0, lastStep: step ?? u.lastStep, backupHashes: usedBackup ? u.backupHashes.filter((h) => h !== usedBackup) : u.backupHashes },
     });
-    return { ok: true, token: this.newSession(usedBackup !== null) };
+    return { ok: true, token: this.newSession(ssoUid) };
   }
 
   backupCodesLeft(): number { return this.users.read().user?.backupHashes.length ?? 0; }
@@ -120,26 +136,29 @@ export class Auth {
   private sign(payload: string, secret: string): string {
     return crypto.createHmac("sha256", secret).update(payload).digest("base64url");
   }
-  private newSession(_viaBackup: boolean): string {
+  private newSession(ssoUid?: string): string {
     const s = this.sess.read();
     const sid = crypto.randomBytes(18).toString("base64url");
     const exp = this.now() + SESSION_MS;
-    for (const [k, v] of Object.entries(s.sessions)) if (v <= this.now()) delete s.sessions[k];
-    s.sessions[sid] = exp;
+    for (const [k, v] of Object.entries(s.sessions)) if (expOf(v) <= this.now()) delete s.sessions[k];
+    s.sessions[sid] = ssoUid ? { exp, sso: ssoUid } : exp;
     this.sess.write(s);
     return `${sid}.${this.sign(sid, s.secret)}`;
   }
-  verifySession(token: string | undefined): boolean {
-    if (!token) return false;
+  /** A good session cookie? `sso` is set when the session rests on the shared sign-in (the caller must then also see that sign-in). */
+  sessionInfo(token: string | undefined): { ok: boolean; sso?: string } {
+    if (!token) return { ok: false };
     const [sid, sig] = token.split(".");
-    if (!sid || !sig) return false;
+    if (!sid || !sig) return { ok: false };
     const s = this.sess.read();
     const want = this.sign(sid, s.secret);
     const a = Buffer.from(sig), b = Buffer.from(want);
-    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return false;
-    const exp = s.sessions[sid];
-    return !!exp && exp > this.now();
+    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return { ok: false };
+    const rec = s.sessions[sid];
+    if (!rec || expOf(rec) <= this.now()) return { ok: false };
+    return typeof rec === "number" ? { ok: true } : { ok: true, sso: rec.sso };
   }
+  verifySession(token: string | undefined): boolean { return this.sessionInfo(token).ok; }
   logout(token: string | undefined): void {
     const sid = token?.split(".")[0];
     if (!sid) return;

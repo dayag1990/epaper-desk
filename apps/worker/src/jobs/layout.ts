@@ -3,6 +3,7 @@ import { autoPlan, formatEditionDate, type Template } from "@epaper/layout";
 import { prisma } from "../db.js";
 import { articlesForRender, edRef, loadArticles, type JobCtx } from "../ctx.js";
 import { pool } from "../pool.js";
+import { publishEvent } from "../events.js";
 import { templateSet } from "../templates.js";
 import { fetchAsset } from "./assets.js";
 import type { Envelope } from "../main.js";
@@ -51,6 +52,7 @@ export async function editionAutoplan(e: Envelope) {
       await reindex(e.paper_id, page.id, full);
     }
     await prisma.edition.update({ where: { id: ed.id }, data: { status: "planned", plan: { unplaced: plan.unplaced, elapsed_ms: plan.elapsed_ms, pages: plan.pages.length } as any } });
+    await publishEvent({ type: "edition.changed", paper_id: e.paper_id, edition_id: ed.id });
   } catch (err) {
     await prisma.edition.update({ where: { id: ed.id }, data: { status: "draft", plan: { error: (err as Error).message } as any } }).catch(() => {});
     throw err;
@@ -84,5 +86,8 @@ export async function pageFit(e: Envelope) {
   const report = reportOf(fit, rev);
   await prisma.pageVersion.updateMany({ where: { page_id: page.id, rev }, data: { snapshot: snap as any, fit_pct: fit.fill_pct } });
   // only move fit info forward
-  await prisma.page.updateMany({ where: { id: page.id, fit_rev: { lte: rev } }, data: { fit_pct: fit.fill_pct, fit_report: report as any, fit_rev: rev, ...(rev === jobRev || rev === page.rev + 1 ? { snapshot: snap as any } : {}) } });
+  const moved = await prisma.page.updateMany({ where: { id: page.id, fit_rev: { lte: rev } }, data: { fit_pct: fit.fill_pct, fit_report: report as any, fit_rev: rev, ...(rev === jobRev || rev === page.rev + 1 ? { snapshot: snap as any } : {}) } });
+  // tell the open editors AFTER the writes: a new text size (a newer version by "system"), then the measured fill
+  if (rev !== jobRev) await publishEvent({ type: "page.updated", paper_id: e.paper_id, page_id: page.id, edition_id: page.edition_id, rev, fill: fit.fill_pct, status: page.status, by: null });
+  if (moved.count === 1) await publishEvent({ type: "page.fit", paper_id: e.paper_id, page_id: page.id, edition_id: page.edition_id, rev, fill: fit.fill_pct, state: fit.state as "ok" | "low" | "over", overflow: fit.overflow });
 }

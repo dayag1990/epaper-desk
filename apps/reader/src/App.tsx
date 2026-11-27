@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
+import { openStream } from "@epaper/theme";
+import { TopBar, useAlertFeed, useAppLinks } from "@epaper/theme/react";
 import { Viewer } from "./Viewer";
 import { searchEdition, type Hit } from "./lib/search";
-import { loadConfig, makeSource } from "./lib/source";
-import type { EditionInfo, EditionSource, PageInfo, TextPage, Zone, ZoneSet } from "./lib/types";
+import { editionChanged, eventsUrl, loadConfig, makeSource } from "./lib/source";
+import type { EditionInfo, EditionSource, PageInfo, ReaderConfig, TextPage, Zone, ZoneSet } from "./lib/types";
 import type { Rect } from "./lib/zones";
 import { zoneText } from "./lib/zones";
 
@@ -23,12 +25,17 @@ async function precache(urls: string[], onDone: (n: number) => void) {
 
 export function App() {
   const [src, setSrc] = useState<EditionSource | null>(null);
+  const [cfg, setCfg] = useState<ReaderConfig | null>(null);
+  const [bump, setBump] = useState(0); // counts "the edition changed on the server": reload its pages
+  const [me, setMe] = useState<{ name: string; email?: string; role: string } | null>(null);
+  const links = useAppLinks();
   const [data, setData] = useState<Data | null>(null);
   const [err, setErr] = useState("");
   const [soft, setSoft] = useState(false); // true: show the message as plain words, not as a fault
   const [route, setRoute] = useState(parseHash());
   const [sheet, setSheet] = useState<{ zone: Zone; lines: string[] } | null>(null);
   const [toast, setToast] = useState("");
+  const [note, setNote] = useState(""); // plain notices (not "Opening: ...")
   const [q, setQ] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [marks, setMarks] = useState<Rect[]>([]);
@@ -43,7 +50,38 @@ export function App() {
     return () => removeEventListener("hashchange", h);
   }, []);
 
-  useEffect(() => { loadConfig().then((c) => setSrc(makeSource(c))).catch((e) => { setSoft(!!e.friendly); setErr(String(e.message ?? e)); }); }, []);
+  useEffect(() => { loadConfig().then((c) => { setCfg(c); setSrc(makeSource(c)); }).catch((e) => { setSoft(!!e.friendly); setErr(String(e.message ?? e)); }); }, []);
+
+  // Staff who are signed in on this address see their name (the public never does). Any failure just means "not signed in".
+  useEffect(() => {
+    if (embed) return;
+    fetch("/v1/me", { credentials: "include", headers: { accept: "application/json" } })
+      .then((r) => (r.ok && (r.headers.get("content-type") ?? "").includes("json") ? r.json() : null))
+      .then((j) => { if (j?.user) setMe({ name: j.user.name || j.user.email || "You", email: j.user.email, role: j.role }); })
+      .catch(() => undefined);
+  }, []);
+  const owner = me?.role === "owner";
+  const feed = useAlertFeed(links.ops, owner);
+  const signOut = async () => { try { await fetch("/v1/auth/logout", { method: "POST", credentials: "include" }); } catch { /* the cookies are cleared by the server */ } location.assign(links.admin); };
+
+  // The open edition refreshes by itself when it is re-exported, corrected or published again: the server tells us
+  // (public live stream), and if that is blocked (or there is none) we look every 15 s.
+  useEffect(() => {
+    if (!src || !cfg || embed) return;
+    let dead = false;
+    const check = async () => {
+      try {
+        const now = await src.edition(route.date);
+        const cur = dataRef.current?.ed;
+        if (!dead && cur && editionChanged(cur, now)) { setBump((n) => n + 1); setNote("This edition was updated. The pages are fresh."); }
+      } catch { /* a failed look is not an error: the next one tries again */ }
+    };
+    const pollMs = Number(new URLSearchParams(location.search).get("poll")) || cfg.pollMs || 15_000;
+    const url = eventsUrl(cfg);
+    if (!url) { const t = setInterval(check, pollMs); return () => { dead = true; clearInterval(t); }; }
+    const s = openStream({ url, pollMs, poll: check, on: { "edition.published": check, "edition.updated": check, resync: check } });
+    return () => { dead = true; s.close(); };
+  }, [src, cfg, route.date]);
 
   // load the edition once per date
   useEffect(() => {
@@ -67,7 +105,7 @@ export function App() {
       } catch (e: any) { if (!dead) { setSoft(!!e.friendly); setErr(String(e.message ?? e)); } }
     })();
     return () => { dead = true; };
-  }, [src, route.date]);
+  }, [src, route.date, bump]);
 
   const pageNo = data ? Math.min(Math.max(route.page, 1), data.pages.length || 1) : 1;
   const go = (n: number) => {
@@ -103,6 +141,7 @@ export function App() {
     setSheet({ zone: z, lines: t ? zoneText(t, z) : [] });
   };
   useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(""), 2500); return () => clearTimeout(t); }, [toast]);
+  useEffect(() => { if (!note) return; const t = setTimeout(() => setNote(""), 4000); return () => clearTimeout(t); }, [note]);
 
   if (err && soft) return <div class="msg" role="status">{err}</div>;
   if (err) return <div class="msg" role="alert">Could not load the edition. Check your connection and try again.</div>;
@@ -124,7 +163,8 @@ export function App() {
   }
 
   return (
-    <div class="app">
+    <div class="app ep-app">
+      <TopBar app="reader" links={links} isOwner={owner} feed={feed} user={me} onSignOut={me ? signOut : undefined} />
       <header>
         <strong class="title">{data.ed.paper}</strong>
         <span class="date">{data.ed.date}</span>
@@ -153,6 +193,7 @@ export function App() {
         <button class="nav prev" aria-label="Previous page" disabled={pageNo <= 1} onClick={() => go(pageNo - 1)}>‹</button>
         <button class="nav next" aria-label="Next page" disabled={pageNo >= data.pages.length} onClick={() => go(pageNo + 1)}>›</button>
         {toast && <div class="toast" role="status">Opening: {toast}</div>}
+        {note && <div class="toast note" role="status" data-testid="note">{note}</div>}
         {sheet && (
           <aside class="story" data-testid="story-sheet">
             <button class="x" aria-label="Close" onClick={() => setSheet(null)}>×</button>

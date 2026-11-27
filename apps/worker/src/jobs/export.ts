@@ -4,6 +4,7 @@ import { packEditionIdml, type PackedAsset } from "@epaper/idml";
 import { prisma } from "../db.js";
 import { articlesForRender, driver, day, edRef, emitWebhook, enqueue, loadArticles, storeFile, type JobCtx } from "../ctx.js";
 import { pool } from "../pool.js";
+import { publishEvent } from "../events.js";
 import { templateSet } from "../templates.js";
 import type { Envelope } from "../main.js";
 
@@ -67,9 +68,11 @@ export async function exportRun(e: Envelope, job: JobCtx) {
       await save("done", { file_key: f.key, snapshot_key: sf.key, file_name: `${base}.zip`, finished_at: new Date() });
     } else throw new Error(`The ${ex.format} export is not available.`);
     await emitWebhook(e.paper_id, "export.ready", { event: "export.ready", paper: paper.slug, edition: day(ed.date), format: ex.format, export_id: ex.id });
+    await publishEvent({ type: "edition.exported", paper_id: e.paper_id, export_id: ex.id, edition_id: ed.id, format: ex.format, status: "done" });
   } catch (err) {
     log.push(logLine(`failed: ${(err as Error).message}`));
     await save(job.final ? "failed" : "queued", job.final ? { finished_at: new Date() } : {}).catch(() => {});
+    if (job.final) await publishEvent({ type: "edition.exported", paper_id: e.paper_id, export_id: ex.id, edition_id: ex.edition_id ?? null, format: ex.format, status: "failed" });
     throw err;
   }
 }

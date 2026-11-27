@@ -6,6 +6,7 @@ import { ApiError, notFound } from "../errors.js";
 import type { FileDriver } from "../files/index.js";
 import { emitWebhook, enqueue } from "../lib/enqueue.js";
 import { storeFile } from "../lib/store.js";
+import { publishEvent } from "../events.js";
 import type { App } from "./types.js";
 
 const Id = z.object({ id: z.string().uuid() });
@@ -128,6 +129,7 @@ export function epaperRoutes(app: App, driver: FileDriver) {
       url: `${hostOf(req)}/v1/public/editions/${e.id}/pages`,
     });
     await audit(p.paper_id, p.user_id, "publish", "ep_edition", e.id, null, null);
+    await publishEvent({ type: e.published_at ? "edition.updated" : "edition.published", paper_id: p.paper_id, ep_edition_id: e.id, edition_id: e.edition_id ?? null, date: day(e.date), version: e.version });
     return { status: "published", publish_at: at };
   });
 
@@ -140,10 +142,12 @@ export function epaperRoutes(app: App, driver: FileDriver) {
       await prisma.epPage.update({ where: { id: latest.id }, data: { rolled_back: true } });
       await prisma.epEdition.update({ where: { id: e.id }, data: { version: { increment: 1 } } });
       await audit(p.paper_id, p.user_id, "rollback", "ep_page", latest.id, null, { no: latest.no });
+      await publishEvent({ type: "edition.updated", paper_id: p.paper_id, ep_edition_id: e.id, edition_id: e.edition_id ?? null, date: day(e.date), version: e.version + 1 });
       return { rolled_back: "page", no: latest.no };
     }
     await prisma.epEdition.update({ where: { id: e.id }, data: { status: "ready", published_at: null } });
     await audit(p.paper_id, p.user_id, "rollback", "ep_edition", e.id, null, null);
+    await publishEvent({ type: "edition.updated", paper_id: p.paper_id, ep_edition_id: e.id, edition_id: e.edition_id ?? null, date: day(e.date), version: e.version });
     return { rolled_back: "edition" };
   });
 

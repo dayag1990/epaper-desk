@@ -29,6 +29,16 @@ export interface Config {
   keepReleases: number;
   /** image names that carry the release tag (a release is usable only when all of them have it) */
   releaseRepos: string[];
+  /** The newsroom login's shared secret (the same value the API has). Unset = the desk uses its own login only. */
+  ssoSecret: string | undefined;
+  /** Domain of the sign-in cookie when the apps live on sub-domains (same value as the API's). */
+  ssoCookieDomain: string | undefined;
+  /** If set, only these e-mail addresses may use the newsroom login here (lower case). Empty = any owner. */
+  ownerEmails: string[];
+  /** Pages allowed to read the alert stream from the browser (CORS), exact origins. */
+  appOrigins: string[];
+  /** Forced addresses of the other apps in the top bar (else worked out from the host name). */
+  links: Partial<Record<"editor" | "admin" | "reader", string>>;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -60,5 +70,18 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     clearDirNames: (env.OPS_CLEAR_DIRS ?? "derived,derivatives,exports,cache,tmp").split(",").map((s) => s.trim()).filter(Boolean),
     keepReleases: 5,
     releaseRepos: (env.OPS_RELEASE_REPOS ?? "epaper/api,epaper/worker").split(",").map((x) => x.trim()).filter(Boolean),
+    ssoSecret: env.SSO_SECRET || undefined,
+    ssoCookieDomain: env.SSO_COOKIE_DOMAIN || undefined,
+    ownerEmails: (env.OPS_OWNER_EMAILS ?? "").split(",").map((x) => x.trim().toLowerCase()).filter(Boolean),
+    appOrigins: appOrigins(env),
+    links: { ...(env.OPS_LINK_EDITOR ? { editor: env.OPS_LINK_EDITOR } : {}), ...(env.OPS_LINK_ADMIN ? { admin: env.OPS_LINK_ADMIN } : {}), ...(env.OPS_LINK_READER ? { reader: env.OPS_LINK_READER } : {}) },
   };
+}
+
+/** On a real domain: the app. and epaper. names next to the desk's own. On one machine: the usual local ports. Or exactly what OPS_APP_ORIGINS says. */
+function appOrigins(env: NodeJS.ProcessEnv): string[] {
+  if (env.OPS_APP_ORIGINS) return env.OPS_APP_ORIGINS.split(",").map((x) => x.trim().replace(/\/$/, "")).filter(Boolean);
+  const host = env.OPS_HOST;
+  if (host) { const root = host.replace(/^ops\./, ""); return [`https://app.${root}`, `https://epaper.${root}`]; }
+  return ["http://127.0.0.1:8100", "http://localhost:8100", "http://127.0.0.1:8102", "http://localhost:8102"];
 }

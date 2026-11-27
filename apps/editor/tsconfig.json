@@ -15,6 +15,8 @@
     "paths": {
       "@epaper/core/jumps": ["../../packages/core/src/jumps.ts"],
       "@epaper/core": ["../../packages/core/src/index.ts"],
+      "@epaper/theme/react": ["../../packages/theme/src/react.tsx"],
+      "@epaper/theme": ["../../packages/theme/src/index.ts"],
       "@epaper/layout/src/*": ["../../packages/layout/src/*"]
     }
   },

@@ -32,7 +32,7 @@ export class HttpSource implements EditionSource {
     if (!list.length) throw new FriendlyError("No edition published yet.");
     // newest date first; on the same day the most recently published edition wins
     const e = [...list].sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(b.published_at ?? "").localeCompare(String(a.published_at ?? "")))[0];
-    return { id: e.id, paper: (!Array.isArray(body) && body.paper?.name) || this.paper, date: String(e.date).slice(0, 10), pages: e.pages ?? e.page_count ?? 0 };
+    return { id: e.id, paper: (!Array.isArray(body) && body.paper?.name) || this.paper, date: String(e.date).slice(0, 10), pages: e.pages ?? e.page_count ?? 0, version: e.version };
   }
 
   async pages(ed: EditionInfo): Promise<PageInfo[]> {
@@ -91,3 +91,9 @@ export async function loadConfig(): Promise<ReaderConfig> {
 export function makeSource(c: ReaderConfig): EditionSource {
   return c.source === "static" ? new StaticSource(c.staticBase ?? "./ed", c.paper) : new HttpSource(c.apiBase ?? "/", c.paper);
 }
+
+/** Did the newsroom publish, re-export or correct this edition since we loaded it? */
+export const editionChanged = (a: EditionInfo, b: EditionInfo) => a.id !== b.id || a.date !== b.date || a.pages !== b.pages || (a.version ?? 0) !== (b.version ?? 0);
+
+/** Where the public live stream for this paper is (HTTP source only: a static folder has none and is just checked every 15 s). */
+export const eventsUrl = (c: ReaderConfig) => (c.source === "http" ? join(c.apiBase ?? "/", `/v1/public/papers/${encodeURIComponent(c.paper)}/events`) : null);

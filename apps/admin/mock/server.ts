@@ -52,9 +52,26 @@ async function body(req: IncomingMessage): Promise<any> {
   return t ? JSON.parse(t) : {};
 }
 
+/** Stand-in for the ops desk's alert stream (the real one is apps/ops): the page under test connects to it across origins, with credentials. */
+const alertStreams = new Set<ServerResponse>();
+let alertSeq = 0;
+
 async function handle(req: IncomingMessage, res: ServerResponse) {
   const url = new URL(req.url ?? "/", "http://x");
   const p = url.pathname, m = req.method ?? "GET";
+  if (p === "/ops/alerts/stream") {
+    const o = req.headers.origin;
+    res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", ...(o ? { "access-control-allow-origin": o, "access-control-allow-credentials": "true" } : {}) });
+    res.write(`retry: 300\nevent: snapshot\ndata: ${JSON.stringify({ recent: [], firing: [], seq: alertSeq })}\n\n`);
+    alertStreams.add(res); req.on("close", () => alertStreams.delete(res));
+    return;
+  }
+  if (p === "/__alert" && m === "POST") {
+    const b = await body(req);
+    const a = { id: b.id, seq: ++alertSeq, episode: String(b.id).split(":")[0], kind: "fired", key: "k", title: b.title, text: b.text, at: new Date().toISOString(), link: "/" };
+    for (const r of alertStreams) { r.write(`event: alert\ndata: ${JSON.stringify(a)}\n\n`); r.write(`event: alert\ndata: ${JSON.stringify(a)}\n\n`); }
+    return send(res, 200, { ok: true });
+  }
   if (p === "/healthz") return send(res, 200, { ok: true });
   if (p === "/readyz") return send(res, 200, { ok: true });
   if (p === "/__reset") { freshAll(); return send(res, 200, { ok: true }); }
@@ -85,7 +102,7 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
   const id = seg.find((x, i) => i > 1 && /^([0-9a-f-]{8,}|art_\d+|s\d+|u-\w+|e\d+)$/.test(x))!;
 
   switch (key) {
-    case "GET /v1/auth/me": return send(res, 200, { paper: { id: st.paper.id, slug: st.paper.slug, name: st.paper.name, lang: st.paper.lang, script: st.paper.script }, role: user.role, user_id: user.id, papers: papersOf(base!, sess!.paper) });
+    case "GET /v1/auth/me": return send(res, 200, { paper: { id: st.paper.id, slug: st.paper.slug, name: st.paper.name, lang: st.paper.lang, script: st.paper.script }, role: user.role, user_id: user.id, user: { name: user.name, email: sess!.email }, papers: papersOf(base!, sess!.paper) });
     case "GET /v1/me/papers": return send(res, 200, { items: papersOf(base!, sess!.paper) });
     case "POST /v1/auth/switch": {
       const to = PAPERS[String(b.paper)] && base!.papers[String(b.paper)] ? String(b.paper) : null;

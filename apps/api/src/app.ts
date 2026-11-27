@@ -29,9 +29,11 @@ import { adminRoutes } from "./routes/admin-index.js";
 import { serveEditor } from "./lib/static.js";
 import { fontRoutes } from "./routes/fonts.js";
 import { opsInternalRoutes } from "./routes/ops-internal.js";
+import { eventRoutes } from "./routes/events.js";
+import { hub } from "./events.js";
 
 export async function buildApp() {
-  const app = Fastify({ logger: { level: "info", redact: ["req.headers.cookie", "req.headers.authorization", "req.headers['x-api-key']"] }, trustProxy: true, bodyLimit: 64 * 1024 * 1024 });
+  const app = Fastify({ logger: { level: "info", redact: ["req.headers.cookie", "req.headers.authorization", "req.headers['x-api-key']"] }, trustProxy: true, bodyLimit: 64 * 1024 * 1024, forceCloseConnections: true }); // open live-update streams must not hold up a restart
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);
   await app.register(cookie);
@@ -87,14 +89,17 @@ export async function buildApp() {
   await app.register(async (s) => exportRoutes(s.withTypeProvider<ZodTypeProvider>(), driver));
   await app.register(async (s) => epaperRoutes(s.withTypeProvider<ZodTypeProvider>(), driver));
   await app.register(async (s) => publicRoutes(s.withTypeProvider<ZodTypeProvider>(), driver));
+  await app.register(async (s) => eventRoutes(s.withTypeProvider<ZodTypeProvider>()));
 
   await app.register(async (s) => adminRoutes(s.withTypeProvider<ZodTypeProvider>()));
   await app.register(async (s) => fontRoutes(s));
   await app.register(async (s) => opsInternalRoutes(s.withTypeProvider<ZodTypeProvider>()));
 
   app.addHook("onReady", async () => {
+    hub.start(); // LISTEN for live updates; if Postgres is away it keeps trying and the screens poll meanwhile
     await ensureQueues(await getBoss());
   });
+  app.addHook("onClose", async () => hub.stop());
   return app;
 }
 export type { z };

@@ -142,3 +142,30 @@ test("20 of 20 sampled taps open the right story", async ({ page, context }) => 
   }
   expect(ok).toBe(20);
 });
+
+test("live: when the newsroom re-exports the edition, the open pages refresh by themselves (no reload) and say so", async ({ page, request }) => {
+  await page.goto("/?poll=300#/latest/2");
+  await expect(page.getByTestId("pageno")).toHaveText("Page 2 / 24");
+  await expect(page.locator("header .date")).toHaveText("2026-11-18");
+  await request.post(`${BASE}/__bump`);
+  await expect(page.locator("header .date")).toHaveText("2026-11-19", { timeout: 8000 });
+  await expect(page.getByTestId("note")).toContainText("This edition was updated");
+  await expect(page.getByTestId("pageno")).toHaveText("Page 2 / 24"); // still on the page being read
+});
+
+test("top bar: links to the other apps; no user and no ops desk link for the public", async ({ page }) => {
+  await page.goto("/#/latest/1");
+  const bar = page.getByTestId("topbar");
+  await expect(bar.getByRole("link", { name: "Reader", exact: true })).toHaveAttribute("aria-current", "page");
+  await expect(bar.getByRole("link", { name: "Editor", exact: true })).toBeVisible();
+  await expect(bar.getByRole("link", { name: "Admin", exact: true })).toBeVisible();
+  await expect(bar.getByRole("link", { name: "Ops desk" })).toHaveCount(0);
+  await expect(page.getByTestId("sign-out")).toHaveCount(0);
+  await expect(page.getByTestId("bell")).toHaveCount(0);
+});
+
+test("embed mode has no top bar", async ({ page }) => {
+  await page.goto("/?embed=1#/latest/1");
+  await expect(page.getByTestId("cover")).toBeVisible();
+  await expect(page.getByTestId("topbar")).toHaveCount(0);
+});

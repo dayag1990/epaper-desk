@@ -4,6 +4,7 @@ import type { EditorConfig } from "./config";
 import type { Draft, DraftStore } from "./draft";
 import { ApiError, plainError } from "./errors";
 import { History } from "./history";
+import type { FitState } from "./layout";
 import type { Meter } from "./refit";
 import { saveSig } from "./refit";
 import { templateFor } from "./templates";
@@ -47,7 +48,22 @@ export interface EditorState {
   dirty: string[];
   /** How many times the page was measured and refitted (the fill meter exposes it so tests can see the refit run). */
   refits: number;
+  /** The server's last measure of each page (from the worker): the tab colour for pages that are not open. */
+  fitState: Record<string, FitState | null>;
+  /** Pages someone else saved while this person has unsaved changes on them: page -> their version. Nothing is overwritten. */
+  remote: Record<string, number>;
+  /** The set of pages changed (planned again, a page deleted): the list on screen is out of date. */
+  listChanged: boolean;
+  /** The live-updates stream: connecting, live, or down (then the page checks every 15 s instead). */
+  live: "connecting" | "live" | "down";
 }
+
+/** What the server tells every open editor (Server-Sent Events, see apps/api/src/events.ts). */
+export type LiveEvent =
+  | { type: "page.updated"; page_id: string; edition_id: string; rev: number; fill: number | null; status: string; by?: string | null }
+  | { type: "page.fit"; page_id: string; edition_id: string; rev: number; fill: number | null; state: FitState | null; overflow: boolean }
+  | { type: "edition.changed"; edition_id: string }
+  | { type: "resync" };
 
 type Timer = ReturnType<typeof setTimeout>;
 
@@ -56,10 +72,13 @@ export class EditorStore {
     phase: "loading", error: null, notice: null, edition: null, me: null, order: [], nos: {}, docs: {}, revs: {}, serverFit: {},
     templates: [], articles: [], assets: {}, active: null, selected: null, access: {}, meters: {},
     save: { state: "saved" }, conflict: null, canUndo: false, canRedo: false, dirty: [], refits: 0,
+    fitState: {}, remote: {}, listChanged: false, live: "connecting",
   };
   private hist = new History<Docs>({});
   private saved: Record<string, string> = {};
   private inflight = new Set<string>();
+  /** events about a page that arrived while this device was saving it: looked at when the save is done */
+  private later = new Map<string, LiveEvent>();
   private listeners = new Set<() => void>();
   private saveTimer?: Timer;
   private retryTimer?: Timer;
@@ -293,6 +312,8 @@ export class EditorStore {
         }
       } finally {
         this.inflight.delete(pid);
+        const ev = this.later.get(pid);
+        if (ev) { this.later.delete(pid); void this.onLive(ev); }
       }
     }
     if (offline) {
@@ -324,7 +345,8 @@ export class EditorStore {
     const c = this.state.conflict;
     if (!c) return;
     const pid = c.pageId;
-    this.set({ conflict: null, save: { state: "unsaved" } });
+    const rest = { ...this.state.remote }; delete rest[pid];
+    this.set({ conflict: null, remote: rest, save: { state: "unsaved" } });
     this.set({ revs: { ...this.state.revs, [pid]: c.theirsRev } });
     if (keep === "theirs") {
       const doc = { ...c.theirs, rev: c.theirsRev };
@@ -340,6 +362,88 @@ export class EditorStore {
       this.afterChange([pid]);
       await this.saveNow();
     }
+  }
+
+  /* ---------- live updates (another person, or the worker, changed something) ---------- */
+  setLive(live: EditorState["live"]) {
+    if (this.state.live !== live) this.set({ live });
+  }
+  /**
+   * One event from the stream (or one change found by the 15 s check). It never overwrites what this person is typing:
+   *  - a page nobody here has touched is replaced quietly by the server's version;
+   *  - a page with unsaved changes is only marked ("Someone changed this page") and the person decides.
+   */
+  async onLive(ev: LiveEvent): Promise<void> {
+    if (this.disposed || this.state.phase !== "ready") return;
+    const edId = this.state.edition?.id;
+    if (ev.type === "resync") return void (await this.refreshFromServer());
+    if (ev.type === "edition.changed") {
+      if (ev.edition_id === edId) this.set({ listChanged: true });
+      return;
+    }
+    const pid = ev.page_id;
+    if (!this.state.docs[pid]) return; // another edition
+    if (ev.fill != null || ev.type === "page.fit") {
+      this.set({
+        serverFit: ev.fill != null ? { ...this.state.serverFit, [pid]: ev.fill } : this.state.serverFit,
+        fitState: ev.type === "page.fit" ? { ...this.state.fitState, [pid]: ev.state } : this.state.fitState,
+      });
+    }
+    if (ev.type !== "page.updated") return;
+    const known = this.state.revs[pid] ?? 0;
+    if (ev.rev <= known) return; // our own save, or old news
+    if (this.inflight.has(pid)) { this.later.set(pid, ev); return; } // our own save is on its way: look again when it is done
+    if (this.dirtyPages().includes(pid)) {
+      if ((this.state.remote[pid] ?? 0) < ev.rev) this.set({ remote: { ...this.state.remote, [pid]: ev.rev } });
+      return;
+    }
+    await this.pull(pid, ev.rev);
+  }
+
+  /** Take the server's version of a page nobody here has changed. */
+  private async pull(pid: string, atLeast: number) {
+    let p: Awaited<ReturnType<Api["page"]>>;
+    try { p = await this.api.page(pid); } catch { return; } // a failed look is not an error: the next event or check tries again
+    if (this.disposed || p.rev <= (this.state.revs[pid] ?? 0) || p.rev < atLeast) return;
+    if (this.dirtyPages().includes(pid) || this.inflight.has(pid)) { // the person started typing while we looked
+      this.set({ remote: { ...this.state.remote, [pid]: p.rev } });
+      return;
+    }
+    const doc = { ...p.doc, rev: p.rev };
+    this.saved[pid] = saveSig(doc);
+    const docs = { ...this.state.docs, [pid]: doc };
+    this.hist.replace(docs);
+    const flipped = this.state.docs[pid]?.status !== doc.status;
+    this.set({ docs, revs: { ...this.state.revs, [pid]: p.rev }, serverFit: { ...this.state.serverFit, [pid]: p.fit_pct } }); // the open page measures itself again
+    void this.drafts.del(pid).catch(() => undefined);
+    if (flipped) {
+      this.setAccess(pid, this.baseAccess(pid));
+      if (this.state.active === pid && this.isEditable(pid)) void this.tryLock(pid);
+    }
+  }
+
+  /** The 15-second check (used while the stream is down, and after the stream came back): compare with what the server has. */
+  async refreshFromServer(): Promise<void> {
+    const ed = this.state.edition;
+    if (!ed || this.disposed || this.state.phase !== "ready") return;
+    let rec: Awaited<ReturnType<Api["edition"]>>;
+    try { rec = await this.api.edition(ed.id); } catch { return; }
+    const ids = rec.pages.map((p) => p.id).sort().join();
+    if (ids !== [...this.state.order].sort().join()) this.set({ listChanged: true });
+    for (const p of rec.pages) {
+      if (!this.state.docs[p.id]) continue;
+      await this.onLive({ type: "page.updated", page_id: p.id, edition_id: ed.id, rev: p.rev, fill: p.fit_pct, status: p.status });
+    }
+  }
+
+  /** "Reload" on the notice: shows both versions side by side (the same choice as a save conflict). Nothing is thrown away. */
+  async reviewRemote(pid: string): Promise<void> {
+    try {
+      const p = await this.api.page(pid);
+      const mine = this.state.docs[pid]!;
+      const rest = { ...this.state.remote }; delete rest[pid];
+      this.set({ remote: rest, conflict: { pageId: pid, mine, theirs: p.doc, theirsRev: p.rev } });
+    } catch (e) { this.set({ notice: plainError(e, "load the other version") }); }
   }
 
   /* ---------- versions, approve ---------- */

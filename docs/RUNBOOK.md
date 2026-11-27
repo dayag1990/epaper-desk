@@ -77,6 +77,29 @@ If any of the four is missing, say so before you start. Do not guess.
 2. If the whole website is down too, the server may be off. Open the provider's console (from the recovery kit) and restart the server. Everything comes back by itself in a few minutes.
 3. If only the desk is dead, restart it from the provider's console. The desk cannot press its own button while it is stopped.
 
+## One login for the editor, admin, reader and the desk (since 2026-11-27)
+You sign in once, in the editor or the admin console. The same sign-in opens the ops desk, which then asks only for your 6-digit code (once per visit). Signing out in any of the four signs you out of all of them.
+
+**One setting makes it work: `SSO_SECRET` in `/srv/epaper/.env`.** It is a long random text that the API and the ops desk both read. Make one on the server (it prints it once; paste it into `.env`, never anywhere else):
+
+    openssl rand -base64 48
+
+Then restart the API and the ops desk. Anyone who knows this text can pretend to be signed in, so treat it like a password. Changing it signs everybody out of the desk (not out of the editor); put the new one in and restart the two.
+
+| Setting (in `.env`) | What it does | If you leave it out |
+|---|---|---|
+| `SSO_SECRET` | Turns the shared sign-in on (16 or more characters). | The desk uses only its own login, as before. Nothing else changes. |
+| `SSO_COOKIE_DOMAIN` | Only when the apps are on different names (`app.`, `ops.`, `epaper.`): the shared part, for example `example.org`, so one sign-in works across them. | The sign-in is shared by the address only (right for one address with different ports). |
+| `OPS_OWNER_EMAILS` | Comma list. Only these e-mail addresses may use the newsroom sign-in on the desk. | Any owner of a paper may. The 6-digit code is still needed. |
+| `OPS_APP_ORIGINS` | Comma list of the editor, admin and reader addresses that may show the desk's alerts. | Worked out from `OPS_HOST` (`app.` and `epaper.`), or the usual local ports. |
+
+**The desk's own login (password + 6-digit code) always stays.** If the editor, the API or the database is down, or `SSO_SECRET` is not set, open the desk and use the form on the login page. It needs nothing else running. This is the "break glass" way in; do not remove it.
+
+What to expect: open the ops address while signed in to the editor, and the desk shows "One more step: your 6-digit code". If you are not signed in to the editor, it shows the normal login page (use it, or sign in at the editor first and reload).
+
+## Alerts: one list, three places (since 2026-11-27)
+Every alert (a red light starting, a reminder every 6 hours, "fixed") is written once to `/srv/epaper/files/_ops/alerts.jsonl`. From that one place it goes to: the small bell and slide-in note in the editor, the admin console and the desk; Telegram; and the desk's own page **Alerts**. The same alert never shows twice. Telegram is still **WAITING ON OWNER** (`ALERT_TELEGRAM_TOKEN`, `ALERT_TELEGRAM_CHAT`): until they are set, the phone line is written to `/srv/epaper/files/alerts.log` and the bell, notes and the Alerts page still work. "Send a test alert" on the desk sends a test through all three.
+
 ## 7. What to tell the builder
 
 Write down the time, the row that was red and the words under it. Copy them from **History** (it lists every press and the result). Do not paste passwords.

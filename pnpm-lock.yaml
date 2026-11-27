@@ -76,6 +76,9 @@ importers:
       '@epaper/layout':
         specifier: workspace:*
         version: link:../../packages/layout
+      '@epaper/sso':
+        specifier: workspace:*
+        version: link:../../packages/sso
       '@fastify/cookie':
         specifier: 11.0.1
         version: 11.0.1
@@ -91,12 +94,19 @@ importers:
       fastify-type-provider-zod:
         specifier: 4.0.2
         version: 4.0.2(fastify@5.2.0)(zod@3.25.30)
+      pg:
+        specifier: 8.13.1
+        version: 8.13.1
       pg-boss:
         specifier: 10.1.6
         version: 10.1.6
       zod:
         specifier: 3.25.30
         version: 3.25.30
+    devDependencies:
+      '@types/pg':
+        specifier: 8.11.10
+        version: 8.11.10
 
   apps/editor:
     dependencies:
@@ -137,6 +147,12 @@ importers:
       '@epaper/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@epaper/sso':
+        specifier: workspace:*
+        version: link:../../packages/sso
+      '@epaper/theme':
+        specifier: workspace:*
+        version: link:../../packages/theme
       fastify:
         specifier: 5.2.0
         version: 5.2.0
@@ -296,6 +312,17 @@ importers:
       zod:
         specifier: 3.23.8
         version: 3.23.8
+
+  packages/sso: {}
+
+  packages/theme:
+    devDependencies:
+      '@types/react':
+        specifier: 18.3.12
+        version: 18.3.12
+      react:
+        specifier: 18.3.1
+        version: 18.3.1
 
 packages:
 
