@@ -1,0 +1,25 @@
+{
+  "name": "@epaper/theme",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
+    "./html": { "types": "./dist/html.d.ts", "import": "./dist/html.js" },
+    "./node": { "types": "./dist/node.d.ts", "import": "./dist/node.js" },
+    "./react": { "types": "./dist/react.d.ts", "import": "./dist/react.js" },
+    "./theme.css": "./theme.css",
+    "./package.json": "./package.json"
+  },
+  "files": ["dist", "theme.css"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@types/react": "18.3.12",
+    "react": "18.3.1"
+  }
+}
