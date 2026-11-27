@@ -12,8 +12,36 @@ export const SlotSchema = z.object({
   words_min: z.number().int().min(0),
   words_max: z.number().int().min(0),
   image: z.boolean(),
+  /** Newspaper finish: 1 = the page's dominant lead slot (auto-plan gives it to the first story whatever its length); others step down. */
+  tier: z.number().int().min(1).max(4).optional(),
+  /** Headline scale and photo ratio (width / height) this slot gives its story. */
+  hs: z.number().positive().optional(),
+  ratio: z.number().positive().optional(),
 });
 export type Slot = z.infer<typeof SlotSchema>;
+
+/**
+ * Newspaper finish ("ruled style"): print rules and furniture, driven by colors.rule. Absent = the plain prototype look.
+ * Everything is optional so a template written before the finish existed loads unchanged.
+ */
+export const FinishSchema = z.object({
+  ruled: z.boolean().default(true),
+  /** Line weights on the template canvas, in CSS px (hair = 1 px is 0.7 pt on a 381 mm broadsheet; Chromium draws nothing thinner). */
+  hair_px: z.number().positive().default(1),
+  heavy_px: z.number().positive().default(4),
+  /** Tinted panel / brief background, #rrggbb. Default: the template's blue mixed 9 % into the paper colour. */
+  tint: z.string().optional(),
+  /** Scripts (Unicode script names) that get a drop cap when a block asks for one. Default: Latin only. */
+  dropcap_scripts: z.array(z.string()).default(["Latin"]),
+  /** Lines the drop cap spans. */
+  dropcap_lines: z.number().int().min(2).max(5).default(3),
+  /** Printed before a byline that does not already start with it ("By "); empty for scripts that have no such custom. */
+  byline_prefix: z.string().default(""),
+  /** Jump lines. {n} = the other page's number. */
+  jump_to: z.string().default("Continued on page {n}"),
+  jump_from: z.string().default("Continued from page {n}"),
+});
+export type Finish = z.infer<typeof FinishSchema>;
 
 export const TemplateSchema = z.object({
   id: z.string().min(1),
@@ -63,6 +91,7 @@ export const TemplateSchema = z.object({
   date_format: z.object({ locale: z.string(), pattern: z.string() }).optional(),
   /** What the IDML export needs to know about this template (paragraph style -> FontStyle named instance, Indic composer). */
   idml: z.object({ font_styles: z.record(z.string()).default({}) }).optional(),
+  finish: FinishSchema.optional(),
   slots: z.array(SlotSchema),
   css_extra: z.string().default(""),
 });
@@ -70,3 +99,39 @@ export type Template = z.infer<typeof TemplateSchema>;
 
 /** Number of text columns a story of `span` grid columns gets by default. */
 export const colsForSpan = (span: number, t: Pick<Template, "body">): number => Math.max(1, Math.round(span / (t.body.span_per_col ?? 1)));
+
+const hex = (h: string): [number, number, number] | null => {
+  const m = /^#?([0-9a-f]{6})$/i.exec(h.trim());
+  if (!m) return null;
+  const n = parseInt(m[1]!, 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+};
+const toHex = (c: readonly number[]) => "#" + c.map((v) => Math.round(v).toString(16).padStart(2, "0")).join("");
+/** `pct` percent of colour `a` over colour `b`, as #rrggbb (the input is returned as is when it is not a hex colour). */
+export function mixHex(a: string, b: string, pct: number): string {
+  const x = hex(a), y = hex(b);
+  if (!x || !y) return b;
+  return toHex(x.map((v, i) => (v * pct) / 100 + y[i]! * (1 - pct / 100)));
+}
+/** Is the ruled style on for this template? */
+export const isRuled = (t: Pick<Template, "finish">): boolean => !!t.finish && t.finish.ruled !== false;
+/** The tint of panels and briefs: from the template's own colours (never a fixed grey). */
+export const panelTint = (t: Pick<Template, "finish" | "colors">): string => t.finish?.tint ?? mixHex(t.colors.blue, t.colors.paper, 9);
+
+/**
+ * Drop cap rule: the first letter of the paragraph is set as a drop cap only in scripts where that looks right. The first
+ * GRAPHEME (Intl.Segmenter, so a Tamil consonant with its vowel sign stays whole) is checked against the template's script list.
+ * Latin: yes. Tamil and Gurmukhi: off by default (see docs/newspaper-finish.md).
+ */
+export function firstGrapheme(text: string): string {
+  const seg = (Intl as unknown as { Segmenter?: new (l?: string, o?: object) => { segment(s: string): Iterable<{ segment: string }> } }).Segmenter;
+  if (!seg) return [...text][0] ?? "";
+  for (const g of new seg(undefined, { granularity: "grapheme" }).segment(text)) return g.segment;
+  return "";
+}
+export function dropcapAllowed(text: string, t: Pick<Template, "finish">): boolean {
+  const g = firstGrapheme(text.trimStart());
+  if (!g || !t.finish) return false;
+  const scripts = t.finish.dropcap_scripts ?? ["Latin"];
+  return scripts.some((s) => new RegExp(`^\\p{Script=${s}}`, "u").test(g)) && /\p{L}/u.test(g);
+}

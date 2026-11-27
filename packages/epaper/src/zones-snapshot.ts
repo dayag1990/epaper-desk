@@ -5,7 +5,7 @@ import { round } from "./util.js";
 
 type Frame = LayoutSnapshot["pages"][number]["frames"][number];
 
-const STORY_ROLES = new Set(["kicker", "head", "sub", "body", "image", "caption"]);
+const STORY_ROLES = new Set(["kicker", "head", "sub", "body", "image", "caption", "byline", "jump"]);
 
 const frac = (v: number, total: number) => Math.min(1, Math.max(0, round(v / total)));
 

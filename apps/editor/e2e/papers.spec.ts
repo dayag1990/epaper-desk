@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-const API = "http://127.0.0.1:8181";
+const API = `http://127.0.0.1:${process.env.E2E_API ?? 8181}`;
 test.use({ viewport: { width: 1440, height: 900 } });
 
 /** Open the editor with ?edition= in the address (so a switch really drops it), as a given mock user. */

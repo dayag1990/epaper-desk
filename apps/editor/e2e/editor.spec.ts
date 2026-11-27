@@ -1,11 +1,11 @@
 import { expect, test, type Page, type BrowserContext } from "@playwright/test";
 
-const API = "http://127.0.0.1:8181";
+const API = `http://127.0.0.1:${process.env.E2E_API ?? 8181}`;
 
 async function open(page: Page, user = "ana", extra: Record<string, unknown> = {}) {
   await page.addInitScript(
     ([cfg]) => { (window as any).__EPAPER_CONFIG__ = cfg; },
-    [{ apiBase: "http://127.0.0.1:8181", mockUser: user, edition: "ed_demo", autosaveMs: 300, lockPollMs: 700, retryMs: 500, ...extra }],
+    [{ apiBase: `http://127.0.0.1:${process.env.E2E_API ?? 8181}`, mockUser: user, edition: "ed_demo", autosaveMs: 300, lockPollMs: 700, retryMs: 500, ...extra }],
   );
   await page.goto("/");
   await expect(page.getByTestId("fill-meter")).toContainText(/%/, { timeout: 15000 });
@@ -147,7 +147,7 @@ test("delete page: no button on an approved page or for a viewer", async ({ page
   await expect(page.getByTestId("lock-banner")).toContainText("approved");
   await expect(page.getByTestId("delete-page")).toHaveCount(0); // read-only page: no button at all
   const v = await page.context().newPage();
-  await v.addInitScript(([cfg]) => { (window as any).__EPAPER_CONFIG__ = cfg; }, [{ apiBase: "http://127.0.0.1:8181", mockUser: "vic", edition: "ed_demo" }]);
+  await v.addInitScript(([cfg]) => { (window as any).__EPAPER_CONFIG__ = cfg; }, [{ apiBase: `http://127.0.0.1:${process.env.E2E_API ?? 8181}`, mockUser: "vic", edition: "ed_demo" }]);
   await v.goto("/");
   await expect(v.getByTestId("fill-meter")).toContainText(/%/, { timeout: 15000 });
   await expect(v.getByTestId("delete-page")).toHaveCount(0);

@@ -5,7 +5,8 @@ import { Fraction, Mm } from "../common.js";
 // D4: what every exporter reads. mm, origin page top-left.
 
 // "caption" (the photo caption line, credit included) was added after the first freeze: a new value, nothing renamed.
-export const FrameRoleSchema = z.enum(["masthead", "strip", "kicker", "head", "sub", "body", "image", "ad", "caption"]);
+// "byline", "jump" (continued-on line), "box" (the border / tint behind a boxed brief, pull quote or panel) and "rule" (a printed line) came with the newspaper finish.
+export const FrameRoleSchema = z.enum(["masthead", "strip", "kicker", "head", "sub", "body", "image", "ad", "caption", "byline", "jump", "box", "rule"]);
 
 export const FrameSchema = z.object({
   id: z.string().min(1), // e.g. "it_1.head" (item id + role), so not a plain prefixed id
@@ -28,6 +29,17 @@ export const FrameSchema = z.object({
   gutter: Mm.optional(),
   paras: z.array(z.string()).optional(),
   overset: z.boolean().optional(),
+  // Newspaper finish, all optional. `block` is set on every text frame and on the "box" frame of a block that is not plain.
+  block: z.enum(["brief", "quote", "panel"]).optional(),
+  /** body frame: the first paragraph starts with a drop cap of this many lines (0/absent = none). */
+  dropcap_lines: z.number().int().positive().optional(),
+  /** body frame: run-in dateline printed (small caps) before the first paragraph. */
+  dateline: z.string().optional(),
+  /** "rule" frames: kind of line. A horizontal rule has h = 0, a vertical one w = 0. */
+  rule: z.enum(["hair", "heavy", "double"]).optional(),
+  /** "rule" and "box" frames: line colour and (box) fill tint, as #rrggbb. */
+  color: z.string().optional(),
+  tint: z.string().optional(),
 });
 
 export const SnapshotPageSchema = z.object({

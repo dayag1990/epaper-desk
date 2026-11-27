@@ -19,6 +19,14 @@ export const ROLE_DEFAULT_STYLE = {
   sub: "Story-sub-head",
   body: "Story-body",
   caption: "Story-caption",
+  byline: "Story-byline",
+  jump: "Story-jump",
+} as const;
+
+/** Paragraph styles the newspaper finish adds (mapped through the same style map as the others). */
+export const FINISH_STYLE = {
+  pullquote: "Story-pullquote",
+  dropcapBody: "Story-body-dropcap",
 } as const;
 
 export const DEFAULT_STYLE_MAP: StyleMap = {

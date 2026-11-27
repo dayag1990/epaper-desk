@@ -4,7 +4,7 @@ import type { Api } from "./api";
 import { plainError } from "./errors";
 import { PageView } from "./PageView";
 import { PaperSwitcher, goToEditionList, switchError } from "./PaperBits";
-import { PAGE_SIZES, addStory, applyTool, ensureSlot, moveTo, resizeItem, placeArticle, setCutout, setFocal, setPageSize, setPhoto, setRatio, setStatus, EMPTY_ASSET, type ToolAction } from "./tools";
+import { PAGE_SIZES, addStory, applyTool, ensureSlot, moveTo, resizeItem, placeArticle, setCutout, setFocal, setPageSize, setPhoto, setRatio, setStatus, setBlockStyle, syncDocs, EMPTY_ASSET, type ToolAction } from "./tools";
 import type { EditorStore } from "./store";
 import type { EditorConfig } from "./config";
 import { KEY_RUN_MS } from "./flow";
@@ -132,7 +132,12 @@ export function App({ store, api, cfg }: { store: EditorStore; api: Api; cfg: Ed
   if (s.phase === "failed") return <div className="center err" role="alert"><p>{s.error}</p><button className="btn" onClick={() => location.reload()}>Try again</button> <a className="btn" href={location.pathname}>Pick an edition</a></div>;
   if (!pid || !doc || !template) return <div className="center">This edition has no pages yet.</div>;
 
-  const edit = (docs: ReturnType<typeof ensureSlot>, touched: string[], key?: string) => store.commit(docs, touched, key);
+  /** Every edit also keeps the "Continued on page N" numbers right (a story moved to another page, a page number changed). */
+  const commit = (docs: ReturnType<typeof ensureSlot>, touched: string[], key?: string, ms?: number) => {
+    const r = syncDocs(docs, s.order);
+    return store.commit(r.docs, [...new Set([...touched, ...r.changed])], key, ms);
+  };
+  const edit = (docs: ReturnType<typeof ensureSlot>, touched: string[], key?: string) => commit(docs, touched, key);
   const tool = (a: ToolAction, run?: string) => {
     if (!s.selected) return;
     if (run) { /* keyboard step: no delete arming */ } else if (a === "del") {
@@ -141,13 +146,13 @@ export function App({ store, api, cfg }: { store: EditorStore; api: Api; cfg: Ed
     } else setDelArmed(false);
     const r = applyTool(s.docs, pid, s.selected, a, { order: s.order, templateOf: store.templateOf, hasSrc });
     if (!r) return;
-    if (!store.commit(r.docs, r.touched, run, run ? KEY_RUN_MS : undefined)) return;
+    if (!commit(r.docs, r.touched, run, run ? KEY_RUN_MS : undefined)) return;
     if (a === "del") store.select(null);
     if (r.pageId !== pid) { void store.setActive(r.pageId).then(() => store.select(s.selected)); }
     if (r.note) store.notify(r.note);
   };
   const afterGesture = (r: { docs: typeof s.docs; touched: string[] } | null, key?: string) => {
-    if (r) store.commit(r.docs, r.touched, key, key ? KEY_RUN_MS : undefined);
+    if (r) commit(r.docs, r.touched, key, key ? KEY_RUN_MS : undefined);
   };
   const toolCtx = { order: s.order, templateOf: store.templateOf, hasSrc };
   const pickImage = (itemId: string) => { pickFor.current = itemId; fileRef.current?.click(); };
@@ -254,6 +259,7 @@ export function App({ store, api, cfg }: { store: EditorStore; api: Api; cfg: Ed
           onKeyStep={(a, id) => tool(a, `kbd:${id}:${a}`)}
           onMoveTo={(id, to) => afterGesture({ docs: moveTo(s.docs, pid, id, to), touched: [pid] })}
           onResize={(id, edge, v) => afterGesture(resizeItem(s.docs, pid, id, edge, v, toolCtx))}
+          onStyle={(id, patch) => edit(setBlockStyle(s.docs, pid, id, patch), [pid])}
         />
       </div>
 
@@ -286,10 +292,10 @@ export function App({ store, api, cfg }: { store: EditorStore; api: Api; cfg: Ed
           />}
           {panel === "tray" && <Tray unplaced={unplaced} stale={stale} onPlace={(a) => {
             const imgs = renderArticles.find((x) => x.id === a.id)?.images[0] ?? a.images[0];
-            edit(placeArticle(s.docs, pid, { id: a.id, rev: a.rev, kicker: a.kicker ?? null, headline: a.headline, subhead: a.subhead ?? null, paras: a.body.filter((b) => b.t === "p").map((b) => b.text), image: imgs ? { asset_id: imgs.asset_id } : undefined }), [pid]);
+            edit(placeArticle(s.docs, pid, { id: a.id, rev: a.rev, kicker: a.kicker ?? null, headline: a.headline, subhead: a.subhead ?? null, byline: a.byline ?? null, dateline: a.dateline ?? null, paras: a.body.filter((b) => b.t === "p").map((b) => b.text), image: imgs ? { asset_id: imgs.asset_id } : undefined }), [pid]);
           }} onMerge={(a) => {
             const d = { ...s.docs };
-            for (const p of s.order) d[p] = { ...d[p]!, items: d[p]!.items.map((i) => i.article_id === a.id ? { ...i, article_rev: a.rev, text: { kicker: a.kicker ?? null, head: a.headline, sub: a.subhead ?? null, body: a.body.filter((b) => b.t === "p").map((b) => b.text) } } : i) };
+            for (const p of s.order) d[p] = { ...d[p]!, items: d[p]!.items.map((i) => i.article_id === a.id ? { ...i, article_rev: a.rev, text: { kicker: a.kicker ?? null, head: a.headline, sub: a.subhead ?? null, body: a.body.filter((b) => b.t === "p").map((b) => b.text), ...(a.byline ? { byline: a.byline } : {}), ...(a.dateline ? { dateline: a.dateline } : {}) } } : i) };
             edit(d, s.order.filter((p) => d[p] !== s.docs[p]));
           }} />}
           {panel === "versions" && <Versions store={store} pid={pid} canEdit={!!canEdit} key={pid + s.revs[pid]} />}

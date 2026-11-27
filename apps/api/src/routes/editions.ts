@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { PageDocSchema, type PageDoc } from "@epaper/core";
+import { PageDocSchema, syncJumps, type PageDoc } from "@epaper/core";
 import { prisma } from "../db.js";
 import { audit, requireRole, WRITE_ROLES } from "../auth.js";
 import { ApiError, notFound } from "../errors.js";
@@ -219,9 +219,25 @@ export function editionRoutes(app: App) {
       prisma.pageArticle.deleteMany({ where: { page_id: page.id } }),
     ];
     const moved: { id: string; no: number; rev: number }[] = [];
+    // "Continued on page N" lines: the page numbers they print follow the renumbering, and a line whose other half was on the deleted page goes
+    const kept = all.filter((x) => x.id !== page.id);
+    const synced = syncJumps(kept.map((x) => (x.no > page.no ? { ...(x.doc as any), page: { ...(x.doc as any).page, no: x.no - 1 } } : (x.doc as any))));
+    const syncedOf = new Map(kept.map((x, k) => [x.id, synced[k]!] as const));
+    for (const x of kept) {
+      if (x.no > page.no || x.status === "approved" || heldByOther(await lockOf(x), p.user_id)) continue;
+      const nd = syncedOf.get(x.id)!;
+      if (JSON.stringify(nd) === JSON.stringify(x.doc)) continue;
+      const jrev = x.rev + 1;
+      const jdoc = { ...nd, rev: jrev };
+      ops.push(
+        prisma.page.update({ where: { id: x.id }, data: { doc: jdoc, rev: jrev } }),
+        prisma.pageVersion.create({ data: { paper_id: p.paper_id, page_id: x.id, rev: jrev, doc: jdoc, source: "renumber", user_id: p.user_id, fit_pct: x.fit_pct } }),
+      );
+      moved.push({ id: x.id, no: x.no, rev: jrev });
+    }
     for (const l of later) {
       const no = l.no - 1, lrev = l.rev + 1;
-      const ldoc = { ...(l.doc as any), page: { ...(l.doc as any).page, no }, rev: lrev };
+      const ldoc = { ...syncedOf.get(l.id)!, page: { ...(l.doc as any).page, no }, rev: lrev };
       ops.push(
         prisma.page.update({ where: { id: l.id }, data: { no, doc: ldoc, rev: lrev } }),
         prisma.pageVersion.create({ data: { paper_id: p.paper_id, page_id: l.id, rev: lrev, doc: ldoc, source: "renumber", user_id: p.user_id, fit_pct: l.fit_pct } }),

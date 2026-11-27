@@ -3,7 +3,7 @@ import { PageDocSchema } from "@epaper/core";
 
 /** Select / edit / drag / resize / keyboard, with the real mouse and keyboard at desktop size (1440x900). */
 test.use({ viewport: { width: 1440, height: 900 } });
-const API = "http://127.0.0.1:8181";
+const API = `http://127.0.0.1:${process.env.E2E_API ?? 8181}`;
 const SHOTS = "e2e-screens";
 
 async function open(page: Page, user = "ana", tab = 2) {

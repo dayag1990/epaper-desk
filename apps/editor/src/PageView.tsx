@@ -4,9 +4,10 @@ import type { Article } from "@epaper/core";
 import { domReady, renderPage, type Template } from "./layout";
 import { fontBase } from "./config";
 import { docSig, refitDom, type Meter } from "./refit";
-import { applyText, type TextSnapshot } from "./tools";
+import { BLOCK_LABELS, applyText, type StylePatch, type TextSnapshot } from "./tools";
+import type { BlockStyle } from "@epaper/core";
 import { COLS_STEP_PX, COLUMNS, DRAG_THRESHOLD_PX, colsFromDrag, dropIndex, predictSlot, readoutText, rowBottom, rowTop, rowsOf, spanFromLeft, spanFromRight, type Rect } from "./flow";
-import { defaultSpan } from "./layout";
+import { defaultSpan, dropcapAllowed } from "./layout";
 import type { ToolAction } from "./tools";
 
 const norm = (s: string | null | undefined) => (s ?? "").replace(/\s+/g, " ").trim();
@@ -22,10 +23,13 @@ export function readText(root: HTMLElement): TextSnapshot {
     if (h) o.head = norm(h.textContent);
     const sub = s.querySelector(".sub");
     if (sub) o.sub = norm(sub.textContent);
+    const by = s.querySelector(".byline");
+    if (by) o.byline = norm(by.textContent);
     const b = s.querySelector(".body");
     if (b) {
       const paras: string[] = [];
-      b.childNodes.forEach((n) => { const t = norm(n.textContent); if (t) paras.push(t); });
+      // the cut-out photo and its caption sit inside the text columns but are not typed text
+      b.childNodes.forEach((n) => { if ((n as HTMLElement).hasAttribute?.("data-noedit")) return; const t = norm(n.textContent); if (t) paras.push(t); });
       o.body = paras;
     }
     items.push(o);
@@ -43,6 +47,8 @@ export function readText(root: HTMLElement): TextSnapshot {
   }
   return out;
 }
+
+const isRuledTemplate = (t: { finish?: { ruled?: boolean } }) => !!t.finish && t.finish.ruled !== false;
 
 export type Edge = "e" | "w" | "s";
 export interface PageViewProps {
@@ -62,6 +68,8 @@ export interface PageViewProps {
   onMoveTo(itemId: string, toIndex: number): void;
   /** Edge handle: "e"/"w" give the new width in columns, "s" the new text columns. */
   onResize(itemId: string, edge: Edge, value: number): void;
+  /** The block's Style control (newspaper finish): plain / boxed brief / pull quote / tinted panel, and the drop cap. */
+  onStyle?(itemId: string, patch: StylePatch): void;
 }
 
 interface Box { x: number; y: number; w: number; h: number; span: number; cols: number; index: number; total: number }
@@ -167,6 +175,8 @@ export function PageView(p: PageViewProps) {
     if (editScope.current !== scope) {
       leaveEdit(false);
       fields.forEach((f) => f.setAttribute("contenteditable", "true"));
+      // a cut-out photo inside the body text is not typed text: keep it out of the editable area
+      scope.querySelectorAll<HTMLElement>("[data-noedit]").forEach((n) => n.setAttribute("contenteditable", "false"));
       editScope.current = scope;
       setEditing(true);
     }
@@ -186,6 +196,7 @@ export function PageView(p: PageViewProps) {
     const sc = editScope.current;
     if (!sc) return;
     sc.querySelectorAll<HTMLElement>(FIELD).forEach((f) => f.removeAttribute("contenteditable"));
+    sc.querySelectorAll<HTMLElement>("[data-noedit]").forEach((n) => n.removeAttribute("contenteditable"));
     editScope.current = null;
     setEditing(false);
     getSelection()?.removeAllRanges();
@@ -354,6 +365,9 @@ export function PageView(p: PageViewProps) {
   };
 
   const showHandles = p.editable && !editing && !!box;
+  const selItem = p.selected ? p.doc.items.find((i) => i.id === p.selected) : undefined;
+  const styleOk = showHandles && !drag && !!selItem && selItem.kind !== "ad" && !!p.onStyle && isRuledTemplate(p.template);
+  const dcOk = !!selItem && dropcapAllowed(selItem.text?.body?.[0] ?? "", p.template);
   return (
     <div
       ref={wrap}
@@ -446,6 +460,32 @@ export function PageView(p: PageViewProps) {
               />
             ))}
           </div>
+          {styleOk && selItem && (
+            <div className="styleinsp" data-testid="style-control" style={{ left: box.x, top: box.y + box.h + 34 }} onClick={(e) => e.stopPropagation()}>
+              <label>
+                <span>Style</span>
+                <select
+                  data-testid="style-select"
+                  aria-label="Block style"
+                  value={selItem.block ?? "plain"}
+                  onChange={(e) => p.onStyle!(selItem.id, { block: e.target.value as BlockStyle })}
+                >
+                  {(Object.keys(BLOCK_LABELS) as BlockStyle[]).map((k) => <option key={k} value={k}>{BLOCK_LABELS[k]}</option>)}
+                </select>
+              </label>
+              <label className={dcOk ? "" : "off"} title={dcOk ? undefined : "A drop cap only looks right in English (Latin) text, so it is switched off for this story."}>
+                <input
+                  type="checkbox"
+                  data-testid="dropcap-toggle"
+                  checked={!!selItem.dropcap && dcOk}
+                  disabled={!dcOk || selItem.block === "quote"}
+                  onChange={(e) => p.onStyle!(selItem.id, { dropcap: e.target.checked })}
+                />
+                <span>Drop cap</span>
+              </label>
+              {selItem.block === "quote" && <small>A pull quote prints the headline as the quote and the sub-headline as who said it. The story text is kept, just not printed here.</small>}
+            </div>
+          )}
           <div className="readout" role="status" data-testid="sel-readout" data-span={box.span} data-cols={box.cols} data-place={box.index + 1} style={{ left: box.x, top: box.y + box.h + 6 }}>
             {readoutText(box.span, box.cols, box.index, box.total)}
           </div>
