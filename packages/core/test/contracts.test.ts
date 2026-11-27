@@ -121,3 +121,46 @@ describe("errors", () => {
     expect(Array.isArray((e.details as { problems: unknown[] }).problems)).toBe(true);
   });
 });
+
+describe("newspaper finish: additive contract fields", () => {
+  it("a page doc without any finish field still validates, and one with them keeps them", () => {
+    ok(c.PageDocSchema, ex.pageDoc);
+    const it0 = ex.pageDoc.items[0]!;
+    const withFinish = { ...ex.pageDoc, items: [{ ...it0, block: "brief", dropcap: true, jump: { role: "to", pair: "it_2", page: 3 }, text: { ...it0.text, byline: "By A", dateline: "Riverton, 3 Nov" } }] };
+    const parsed = c.PageDocSchema.parse(withFinish);
+    expect(parsed.items[0]).toMatchObject({ block: "brief", dropcap: true, jump: { role: "to", pair: "it_2", page: 3 }, text: { byline: "By A", dateline: "Riverton, 3 Nov" } });
+    bad(c.PageDocSchema, { ...ex.pageDoc, items: [{ ...it0, block: "poster" }] });
+    bad(c.PageDocSchema, { ...ex.pageDoc, items: [{ ...it0, jump: { role: "sideways", pair: "it_2" } }] });
+  });
+  it("D4 frames take the new roles and fields", () => {
+    const f = { id: "it_1.box", item: "it_1", role: "box", x: 1, y: 2, w: 3, h: 4, block: "panel", color: "#1a1a1a", tint: "#eeeeee" };
+    expect(c.FrameSchema.parse(f)).toMatchObject({ role: "box", block: "panel" });
+    expect(c.FrameSchema.parse({ id: "r1", item: "it_furniture", role: "rule", x: 0, y: 0, w: 10, h: 0, rule: "double", color: "#000000" })).toMatchObject({ rule: "double" });
+    expect(c.FrameSchema.parse({ id: "it_1.body", item: "it_1", role: "body", x: 0, y: 0, w: 1, h: 1, dropcap_lines: 3, dateline: "Riverton, 3 Nov —" })).toMatchObject({ dropcap_lines: 3 });
+  });
+});
+
+describe("jump lines stay in sync", () => {
+  const mk = (no: number, items: { id: string; jump?: { role: "to" | "from"; pair: string; page?: number } }[]) =>
+    ({ page: { no, size: "b", w_mm: 1, h_mm: 1, template: "t", body_pt: 9 }, items: items.map((i) => ({ id: i.id, kind: "story" as const, text: { head: "H", body: ["a", "b", "c", "d"] }, ...(i.jump ? { jump: i.jump } : {}) })), status: "draft", rev: 1 }) as never as import("../src/index.js").PageDoc;
+  it("renumbers the page number printed on a jump when pages move up", () => {
+    const docs = [mk(1, [{ id: "it_a", jump: { role: "to", pair: "it_b", page: 3 } }]), mk(2, []), mk(3, [{ id: "it_b", jump: { role: "from", pair: "it_a", page: 1 } }])];
+    expect(c.syncJumps(docs)).toBe(docs); // already right: same objects back
+    const after = [docs[0]!, { ...docs[2]!, page: { ...docs[2]!.page, no: 2 } }]; // page 2 deleted, page 3 became 2
+    const s = c.syncJumps(after);
+    expect(s[0]!.items[0]!.jump).toEqual({ role: "to", pair: "it_b", page: 2 });
+    expect(s[1]!.items[0]!.jump).toEqual({ role: "from", pair: "it_a", page: 1 });
+  });
+  it("drops a jump whose partner is gone, so no line points at a page that does not exist", () => {
+    const docs = [mk(1, [{ id: "it_a", jump: { role: "to", pair: "it_b", page: 3 } }])];
+    expect(c.syncJumps(docs)[0]!.items[0]!.jump).toBeUndefined();
+  });
+  it("continueStory splits a story over two pages and links the halves", () => {
+    const docs = [mk(1, [{ id: "it_a" }]), mk(2, [{ id: "it_x" }])];
+    const r = c.continueStory(docs, { item: "it_a", toPage: 2, atPara: 2, newId: "it_a2" })!;
+    expect(r[0]!.items[0]!.text!.body).toEqual(["a", "b"]);
+    expect(r[1]!.items[0]).toMatchObject({ id: "it_a2", text: { body: ["c", "d"] }, jump: { role: "from", pair: "it_a", page: 1 } });
+    expect(r[0]!.items[0]!.jump).toEqual({ role: "to", pair: "it_a2", page: 2 });
+    expect(c.continueStory(docs, { item: "it_a", toPage: 1, newId: "it_z" })).toBeNull();
+  });
+});

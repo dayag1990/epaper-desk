@@ -5,6 +5,7 @@ export * from "./contracts/d1-article.js";
 export * from "./contracts/d2-connector-and-mapping.js";
 export * from "./contracts/d3-pagedoc.js";
 export * from "./contracts/d4-layout-snapshot.js";
+export * from "./jumps.js";
 export * from "./contracts/d5-zones.js";
 export * from "./contracts/d6-hooks-and-embed.js";
 export * from "./contracts/d9-health-and-service-list.js";

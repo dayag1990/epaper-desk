@@ -26,6 +26,10 @@ export const ItemTextSchema = z.object({
   head: z.string(),
   sub: z.string().nullish(),
   body: z.array(z.string()), // print copy, not web copy
+  /** "By Jane Doe": printed under the headline and deck (newspaper finish). Optional, additive. */
+  byline: z.string().nullish(),
+  /** "Riverton, 3 Nov": run into the first paragraph in small caps. Optional, additive. */
+  dateline: z.string().nullish(),
 });
 
 export const ItemImageSchema = z.object({
@@ -34,6 +38,22 @@ export const ItemImageSchema = z.object({
   cutout: z.boolean(),
   focal: z.tuple([Fraction, Fraction]), // x, y as 0-1
 });
+
+/** How a block looks on the page (newspaper finish). Absent = plain. */
+export const BlockStyleSchema = z.enum(["plain", "brief", "quote", "panel"]);
+export type BlockStyle = z.infer<typeof BlockStyleSchema>;
+
+/**
+ * A story that runs on from one page to another: the "to" half says "Continued on page N", the "from" half says
+ * "Continued from page N". `pair` is the item id of the other half; `page` is that half's page number, kept
+ * in sync by syncJumps() when pages are deleted or renumbered.
+ */
+export const JumpSchema = z.object({
+  role: z.enum(["to", "from"]),
+  pair: ItemId,
+  page: z.number().int().min(1).optional(),
+});
+export type Jump = z.infer<typeof JumpSchema>;
 
 export const ItemStylesSchema = z.object({
   head: z.string(),
@@ -54,6 +74,11 @@ export const PageItemSchema = z.object({
   text: ItemTextSchema.optional(),
   image: ItemImageSchema.optional(),
   styles: ItemStylesSchema.optional(),
+  /** Newspaper finish (all optional and additive: a page without them looks and loads as before). */
+  block: BlockStyleSchema.optional(),
+  /** Drop cap on the first paragraph (only applied to scripts where it looks right; see docs/newspaper-finish.md). */
+  dropcap: z.boolean().optional(),
+  jump: JumpSchema.optional(),
 });
 
 export const PageDocSchema = z.object({
