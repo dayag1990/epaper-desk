@@ -4,7 +4,15 @@
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "strict": true, "skipLibCheck": true, "noEmit": true,
     "jsx": "react-jsx", "jsxImportSource": "preact",
-    "types": []
+    "types": [],
+    "paths": {
+      "preact": ["./node_modules/preact"],
+      "preact/*": ["./node_modules/preact/*"],
+      "react": ["./node_modules/preact/compat"],
+      "react/jsx-runtime": ["./node_modules/preact/jsx-runtime"],
+      "@epaper/theme/react": ["../../packages/theme/src/react.tsx"],
+      "@epaper/theme": ["../../packages/theme/src/index.ts"]
+    }
   },
   "include": ["src", "tests"]
 }

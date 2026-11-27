@@ -7,7 +7,7 @@ export type Zone = ZoneSet["zones"][number];
 export interface TextLine { x0: number; y0: number; x1: number; y1: number; text: string }
 export interface TextPage { page: number; w: number; h: number; lines: TextLine[] }
 
-export interface EditionInfo { id: string; paper: string; date: string; pages: number }
+export interface EditionInfo { id: string; paper: string; date: string; pages: number; /** bumps when the edition is re-published or a page is replaced */ version?: number }
 export interface PageInfo {
   id: string;
   no: number;
@@ -34,4 +34,6 @@ export interface ReaderConfig {
   apiBase?: string;
   staticBase?: string;
   paper: string;
+  /** how often to look for a re-exported edition when the live stream is not available, ms (default 15000) */
+  pollMs?: number;
 }

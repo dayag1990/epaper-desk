@@ -37,6 +37,12 @@ createServer((req, res) => {
   if (path === "/config.json") {
     res.writeHead(200, { "content-type": "application/json", ...cors });
     res.end(JSON.stringify({ source: "static", staticBase: "./ed", paper: "riverton-herald" }));
+  } else if (path === "/__bump" && req.method === "POST") {
+    // test hook: the newsroom re-exported the edition (the pointer file now says a different date)
+    const f = join(out, "ed/latest.json");
+    const l = JSON.parse(readFileSync(f, "utf8"));
+    writeFileSync(f, JSON.stringify({ ...l, date: "2026-11-19" }));
+    res.writeHead(200, { "content-type": "application/json", ...cors }).end("{}");
   } else if (path.startsWith("/ed/")) file(res, safe(join(out, "ed"), path.slice(4)));
   else file(res, safe(dist, path === "/" ? "index.html" : path.slice(1)), path === "/sw.js" ? { "cache-control": "no-cache" } : {});
 }).listen(PORT, "127.0.0.1", () => console.log(`reader http://127.0.0.1:${PORT}/`));

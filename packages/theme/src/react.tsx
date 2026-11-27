@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
 import { BELL_SVG } from "./html.js";
 import { AlertFeed, browserStorage, connectAlerts, type AlertEvent, type FeedSnapshot } from "./live.js";
 import { APP_NAMES, APP_ORDER, resolveLinks, type AppId, type AppLinks } from "./links.js";
@@ -23,7 +23,7 @@ export function useAppLinks(): AppLinks {
 const useFeed = (feed: AlertFeed | null): FeedSnapshot => {
   const empty = useMemo(() => new AlertFeed(), []);
   const f = feed ?? empty;
-  return useSyncExternalStore(f.subscribe, f.getSnapshot, f.getSnapshot);
+  return useSyncExternalStore(f.subscribe, f.getSnapshot);
 };
 
 /** Owners get the alert stream from the ops desk (signed in by the shared cookie). Returns the feed, or null for everyone else. */
@@ -43,7 +43,7 @@ export interface TopBarProps {
   /** Owners only: shows the Ops desk link and the alert bell. */
   isOwner?: boolean;
   /** Paper name and the paper switcher (each app has its own, it just goes here). */
-  children?: React.ReactNode;
+  children?: ReactNode;
   onSignOut?: () => void | Promise<void>;
   feed?: AlertFeed | null;
   links?: AppLinks;
