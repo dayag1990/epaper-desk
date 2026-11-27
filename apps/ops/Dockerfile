@@ -1,16 +1,21 @@
 # syntax=docker/dockerfile:1
 # The ops desk image. Built from the repo root (see docker-compose.ops.yml):
 #   docker build -f apps/ops/Dockerfile .
-# Only apps/ops and packages/core are copied in: no api, worker, Prisma or Chromium.
+# Only apps/ops, packages/core, packages/sso (the shared sign-in cookie check) and packages/theme (the shared look, top bar, alert code)
+# are copied in: no api, worker, Prisma or Chromium.
 FROM node:22.12.0-slim AS build
 ENV PNPM_HOME=/pnpm PATH=/pnpm:$PATH CI=true
 RUN corepack enable && corepack prepare pnpm@9.15.4 --activate
 WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
 COPY packages/core packages/core
+COPY packages/sso packages/sso
+COPY packages/theme packages/theme
 COPY apps/ops apps/ops
 RUN pnpm install --frozen-lockfile --filter "@epaper/ops..." \
  && pnpm --filter @epaper/core build \
+ && pnpm --filter @epaper/sso build \
+ && pnpm --filter @epaper/theme build \
  && pnpm --filter @epaper/ops build
 
 # docker CLI + compose plugin only (no daemon). It talks to the socket PROXY via DOCKER_HOST, never to a raw socket.

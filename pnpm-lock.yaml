@@ -147,6 +147,12 @@ importers:
       '@epaper/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@epaper/sso':
+        specifier: workspace:*
+        version: link:../../packages/sso
+      '@epaper/theme':
+        specifier: workspace:*
+        version: link:../../packages/theme
       fastify:
         specifier: 5.2.0
         version: 5.2.0

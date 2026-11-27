@@ -6,6 +6,7 @@
   --press: #111111;      /* type, logo */
   --cream: #F4EFE6;      /* backgrounds */
   --proof: #E63B2E;      /* accent: ONE primary action, the active tab marker, error and alert state */
+  --proof-hover: #EE5A4E;
   --plate: #1F4FFF;      /* links, secondary panels */
   --grey: #5C5C5C;       /* secondary text */
   --brass: #B08D3C;      /* small touches only */
@@ -88,7 +89,7 @@
 .ep-btn:hover { background: var(--cream-2); }
 .ep-btn:active { transform: translateY(1px); }
 .ep-btn.primary { background: var(--proof); color: var(--on-accent); }
-.ep-btn.primary:hover { background: #EE5A4E; }
+.ep-btn.primary:hover { background: var(--proof-hover); }
 .ep-btn.quiet { border-color: transparent; background: transparent; text-decoration: underline; }
 .ep-btn.danger { border-color: var(--proof); box-shadow: inset 0 -4px 0 var(--proof); }
 .ep-btn:disabled { opacity: .45; cursor: default; }

@@ -1,28 +1,35 @@
 # Alert rules. They are checked by the ops desk itself every 15 seconds and never use the API.
-# Sent to Telegram when ALERT_TELEGRAM_TOKEN and ALERT_TELEGRAM_CHAT are set, else written to /srv/epaper/files/alerts.log.
+# Every alert goes ONE way: into the alert hub (apps/ops/src/alertlog.ts), which writes it to the alerts log, shows it as a toast and in the bell
+# (editor, admin, ops desk) and sends it to Telegram when ALERT_TELEGRAM_TOKEN and ALERT_TELEGRAM_CHAT are set, else to /srv/epaper/files/alerts.log.
+# title: the short headline on the toast and in the alert list (optional).
 # A metric rule fires while `expr` is TRUE for `for_s` seconds. on_missing: fire = "no number at all" also alerts (backups).
 repeat_s: 21600   # a reminder every 6 hours while it stays broken
 rules:
   - id: service_red
     kind: service_red
     for_s: 120
+    title: "{service} needs you"
     message: "{service} has been red for 2 minutes."
   - id: disk_low
     expr: disk_free_gb < 20
     for_s: 0
     on_missing: fire
+    title: "The disk is nearly full"
     message: "The disk has less than 20 GB free. Press 'Free disk space'."
   - id: backup_old
     expr: last_backup_age_min > 5
     for_s: 0
     on_missing: fire
+    title: "Backups are late"
     message: "The last backup is older than 5 minutes (or there is none). Press 'Back up now'."
   - id: drill_old
     expr: drill_age_days > 7 or drill_pass == 0
     for_s: 0
     on_missing: fire
+    title: "The restore check is overdue"
     message: "The restore check is older than 7 days or failed. Press 'Check backups now'."
   - id: dead_letter
     expr: dead_letter > 0
     for_s: 600
+    title: "Failed jobs are waiting"
     message: "Failed jobs have been waiting for 10 minutes. Press 'Retry failed jobs'."

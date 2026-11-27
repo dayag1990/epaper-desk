@@ -28,7 +28,7 @@ describe("tokens", () => {
   });
   it("css has no hard-coded text colours outside the tokens (only var() and the transparent/hover tints)", () => {
     const hex = [...css.matchAll(/#[0-9A-Fa-f]{6}\b/g)].map((m) => m[0].toUpperCase());
-    const allowed = new Set([...Object.values(allTokens).map((v) => v.toUpperCase()), "#EE5A4E"]);
+    const allowed = new Set([...Object.values(allTokens).map((v) => v.toUpperCase()), "#EE5A4E"]); // the last one is the hover tint of proof red
     for (const h of hex) expect(allowed.has(h), h).toBe(true);
     expect(contrast("#EE5A4E", palette.press)).toBeGreaterThanOrEqual(4.5);
   });

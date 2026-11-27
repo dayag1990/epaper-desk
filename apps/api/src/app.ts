@@ -33,7 +33,7 @@ import { eventRoutes } from "./routes/events.js";
 import { hub } from "./events.js";
 
 export async function buildApp() {
-  const app = Fastify({ logger: { level: "info", redact: ["req.headers.cookie", "req.headers.authorization", "req.headers['x-api-key']"] }, trustProxy: true, bodyLimit: 64 * 1024 * 1024 });
+  const app = Fastify({ logger: { level: "info", redact: ["req.headers.cookie", "req.headers.authorization", "req.headers['x-api-key']"] }, trustProxy: true, bodyLimit: 64 * 1024 * 1024, forceCloseConnections: true }); // open live-update streams must not hold up a restart
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);
   await app.register(cookie);
