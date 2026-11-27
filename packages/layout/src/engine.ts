@@ -206,7 +206,7 @@ export class LayoutEngine {
   }
 
   private frame(f: RawFrame, doc: PageDoc, t: Template, mm: (v: number) => number, pxMm: (px: number) => number) {
-    const id = `${f.item}.${f.role}`;
+    const id = `${f.item}.${f.role}${f.sfx ?? ""}`;
     const base = { id, item: f.item, role: f.role, x: mm(f.x), y: mm(f.y), w: mm(f.w), h: mm(f.h) };
     // fontPx is as laid out on the canvas; convert px on the canvas to pt on paper.
     const pt = f.fontPx ? round(pxToPt(f.fontPx, t), 2) : undefined;
@@ -226,11 +226,16 @@ export class LayoutEngine {
         wrap: item?.image?.cutout ? ("alpha" as const) : ("none" as const),
       };
     }
-    const common = { ...base, ...(f.style ? { style: f.style } : {}), ...(f.fontFamily ? { font: f.fontFamily } : {}), ...(pt ? { size_pt: pt } : {}) };
+    if (f.role === "rule") return { ...base, rule: f.rule, ...(f.color ? { color: f.color } : {}) };
+    if (f.role === "box") return { ...base, ...(f.block ? { block: f.block } : {}), ...(f.color ? { color: f.color } : {}), ...(f.tint ? { tint: f.tint } : {}) };
+    const common = { ...base, ...(f.style ? { style: f.style } : {}), ...(f.fontFamily ? { font: f.fontFamily } : {}), ...(pt ? { size_pt: pt } : {}), ...(f.block ? { block: f.block } : {}) };
     if (f.role === "body") {
       const bottom = f.y + f.h;
       const pageH = doc.page.h_mm / doc.page.w_mm;
-      return { ...common, cols: f.cols, gutter: round(pxMm(f.gutterPx ?? 0), 2), paras: f.paras, overset: bottom > pageH + 0.001 };
+      return {
+        ...common, cols: f.cols, gutter: round(pxMm(f.gutterPx ?? 0), 2), paras: f.paras, overset: bottom > pageH + 0.001,
+        ...(f.dropcap ? { dropcap_lines: t.finish?.dropcap_lines ?? 3 } : {}), ...(f.dateline ? { dateline: f.dateline } : {}),
+      };
     }
     return { ...common, ...(f.text ? { text: f.text } : {}) };
   }

@@ -70,10 +70,23 @@ function compositions(total: number, k: number, min: number): number[][] {
 export function planTiers(list: readonly Article[], t: Template, compact = 0): TierPlan[] {
   const n = list.length;
   if (!n) return [];
+  const C = t.columns;
+  const leadMin = Math.min(C, Math.ceil(C * 0.6));
+  let best: { cost: number; plan: TierPlan[] } | null = null;
+  // the lead's width L is tried from the full width down to 60 %; every other story is at most L wide, so the lead is the widest
+  for (let L = C; L >= leadMin; L--) {
+    const r = planWith(list, t, compact, L);
+    if (r && (!best || r.cost < best.cost - 1e-9)) best = r;
+  }
+  const out = best ? best.plan : planWith(list, t, compact, C)!.plan;
+  return capLeadPhoto(out, list, t);
+}
+
+function planWith(list: readonly Article[], t: Template, compact: number, L: number): { cost: number; plan: TierPlan[] } | null {
+  const n = list.length;
   const T1 = tierSlot(t, 1)!, T2 = tierSlot(t, 2) ?? T1, T3 = tierSlot(t, 3) ?? T2;
   const C = t.columns;
   const minSpan = 2;
-  const leadMin = Math.ceil(C * 0.6);
   const look = (tier: 1 | 2 | 3, span: number) => { const s = tier === 1 ? T1 : tier === 2 ? T2 : T3; return { hs: Math.max(0.8, (s.hs ?? 1) - (tier === 1 ? 0.1 : 0.05) * compact), ratio: tierRatio(tier, span, s.ratio ?? 1.8) * (1 + 0.3 * compact) }; };
   const maxRow = Math.min(3, Math.floor(C / minSpan));
   type Row = { cost: number; spans: number[]; tiers: (1 | 2 | 3)[] };
@@ -81,34 +94,31 @@ export function planTiers(list: readonly Article[], t: Template, compact = 0): T
     const k = j - i;
     let best: Row | null = null;
     for (const comp of compositions(C, k, minSpan)) {
-      if (i === 0 && k > 1 && comp[0]! < leadMin) continue;
-      // a story after the lead is never wider than the lead
+      if (i === 0 ? comp[0] !== L : comp.some((sp) => sp > L)) continue;
       const tiers = comp.map((_, x) => (i + x === 0 ? 1 : rowNo === 1 ? 2 : 3) as 1 | 2 | 3);
       const hs = comp.map((sp, x) => estimateHeight(list[i + x]!, sp, t, look(tiers[x]!, sp).hs, look(tiers[x]!, sp).ratio));
       const hi = Math.max(...hs), lo = Math.min(...hs);
-      // uneven row = a hole; a lone story spans the full width and has none. Prefer wider columns for the taller story (comp order = story order).
-      const cost = k === 1 ? (i === 0 ? 0.15 : 0.15 + (list[i]!.images.length ? 0.2 : 0)) : (hi - lo) / hi;
+      // uneven row = a hole; a lone story spans the full width and has none, but a lone secondary with a photo is a poor second lead
+      const cost = k === 1 ? (i === 0 ? 0.15 : 0.15 + (list[i]!.images.length ? 0.45 : 0)) : (hi - lo) / hi;
       if (!best || cost < best.cost - 1e-9) best = { cost, spans: comp, tiers };
     }
     return best;
   };
-  // f[i] = best cost of arranging the first i stories; rows numbered from 0
   const f: number[] = new Array(n + 1).fill(Infinity);
   const from: { j: number; row: Row }[] = new Array(n + 1);
   const rowNoAt: number[] = new Array(n + 1).fill(0);
   f[0] = 0;
-  // rows are numbered by their start, which depends on the path: carry the count along the best path
   for (let j = 1; j <= n; j++) {
     for (let k = 1; k <= maxRow && k <= j; k++) {
       const i = j - k;
       if (f[i] === Infinity) continue;
       const row = rowCost(i, j, rowNoAt[i]!);
       if (!row) continue;
-      // the lead's row must contain story 0: it starts at i = 0 by construction
       const c = f[i]! + row.cost;
       if (c < f[j]! - 1e-9) { f[j] = c; from[j] = { j: i, row }; rowNoAt[j] = rowNoAt[i]! + 1; }
     }
   }
+  if (f[n] === Infinity) return null;
   const out: TierPlan[] = new Array(n);
   let j = n;
   let rowNo = rowNoAt[n]! - 1;
@@ -119,6 +129,20 @@ export function planTiers(list: readonly Article[], t: Template, compact = 0): T
       out[i + x] = { span: row.spans[x]!, cols: tierCols(row.spans[x]!, t), ...look(tier, row.spans[x]!), tier, row: rowNo };
     }
     j = i; rowNo--;
+  }
+  return { cost: f[n]!, plan: out };
+}
+
+function capLeadPhoto(out: TierPlan[], list: readonly Article[], t: Template): TierPlan[] {
+  const n = list.length;
+  // the lead's photo is the biggest on the page: a secondary photo is made flatter until its area is under 90 % of the lead's
+  if (list[0]!.images.length) {
+    const leadArea = spanPx(out[0]!.span, t) ** 2 / out[0]!.ratio;
+    for (let x = 1; x < n; x++) {
+      if (!list[x]!.images.length) continue;
+      const need = spanPx(out[x]!.span, t) ** 2 / (0.9 * leadArea);
+      if (out[x]!.ratio < need) out[x] = { ...out[x]!, ratio: Math.round(need * 100) / 100 };
+    }
   }
   return out;
 }

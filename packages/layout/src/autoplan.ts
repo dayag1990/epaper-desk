@@ -275,7 +275,7 @@ export async function autoPlan(
   const spanOv = new Map<string, number>(); // article id -> span chosen by the repair
   const compact = new Map<number, number>(); // page -> how compact its ruled furniture is (0-3), raised when the page overflows
   let evaluations = 0;
-  const budget = opts.repairBudget ?? (templates.some(isTiered) ? 40 + 15 * nPages : 40);
+  const budget = opts.repairBudget ?? (templates.some(isTiered) ? 14 : 40);
   type Ev = { t: Template; fit: FitReport };
   const cache = new Map<string, Ev>();
   const evalPage = async (p: number, list: Article[]): Promise<Ev> => {
@@ -399,9 +399,15 @@ export async function autoPlan(
         // too full: widen (shorter columns); too empty: narrow (taller)
         for (const d of over ? [1, -1] : [-1, 1]) {
           const next = cur + d;
-          // the lead of a tiered page stays dominant: never narrower than 5 columns of 8 (or the same share of a narrower grid)
-          const floor = a === leadFirst([...list].sort(order))[0] && leadSlot(evals[i]!.t) ? Math.ceil(evals[i]!.t.columns * 0.6) : 2;
-          if (next < floor || next > evals[i]!.t.columns || spent()) continue;
+          // the lead of a tiered page stays dominant: never narrower than 60 % of the columns, never narrower than another story,
+          // and no other story is ever wider than the lead
+          const tiered = !!leadSlot(evals[i]!.t);
+          const lead = tiered ? leadFirst([...list].sort(order))[0] : undefined;
+          const spanOf = (x: Article) => evals[i]!.fit.doc.items.find((it) => it.article_id === x.id)?.span ?? 3;
+          const others = lead ? Math.max(...list.filter((x) => x !== lead).map(spanOf), 2) : 2;
+          const floor = lead && a === lead ? Math.max(Math.ceil(evals[i]!.t.columns * 0.6), others) : 2;
+          const ceil = lead && a !== lead ? spanOf(lead) : evals[i]!.t.columns;
+          if (next < floor || next > ceil || spent()) continue;
           const old = spanOv.get(a.id);
           spanOv.set(a.id, next);
           const e = await evalPage(i + 1, list);

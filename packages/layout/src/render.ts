@@ -75,14 +75,15 @@ function figHtml(item: PageItem, src: string | null, isAd: boolean, editable: bo
 
 /**
  * A cut-out photo (a PNG with a transparent background) sits INSIDE the text columns as a float, so the body text runs round its
- * outline: `shape-outside: url(the picture)` makes the browser read the alpha channel (threshold 0.3), and where it cannot (the
- * picture is on another origin without CORS headers, or has no alpha) the float's own rectangle is the shape, which is the
- * rectangular fallback. The figure is a little wider than the column on the outer side so it breaks the frame. It carries
+ * outline: domReady() reads the PNG's alpha channel and sets `shape-outside: polygon(...)` on the figure (see dom.ts); where it
+ * cannot (the picture is on another origin without CORS headers, or has no alpha) the float's own rectangle is the shape, which is
+ * the rectangular fallback. (CSS `shape-outside: url()` was tried first: Chromium places the image at its natural pixel size,
+ * not stretched to the figure, so the outline would be wrong whenever the picture is scaled.) The figure is a little wider than the column on the outer side so it breaks the frame. It carries
  * data-noedit so the editor never makes it part of the typed text.
  */
 function cutoutHtml(item: PageItem, src: string, cap: string): string {
   const img = item.image!;
-  const fig = `<div class="fig cutout${cap ? " has-cap" : ""}" data-noedit="1" data-asset="${esc(img.asset_id)}" style="shape-outside:url(&quot;${esc(src)}&quot;)"><img alt="" src="${esc(src)}"></div>`;
+  const fig = `<div class="fig cutout${cap ? " has-cap" : ""}" data-noedit="1" data-asset="${esc(img.asset_id)}"><img alt="" src="${esc(src)}"></div>`;
   return fig + (cap ? cap.replace('class="cap"', 'class="cap cutcap" data-noedit="1"') : "");
 }
 

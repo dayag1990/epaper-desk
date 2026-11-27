@@ -114,7 +114,7 @@ export async function validateIdml(bytes: Uint8Array, snapshot?: LayoutSnapshot 
       maxDelta = Math.max(maxDelta, dw, dh);
       if (dw > 0.1 || dh > 0.1) problems.push(`${sn}: page size differs from the snapshot`);
     }
-    const frames = [...all(spread, "TextFrame"), ...all(spread, "Rectangle")];
+    const frames = [...all(spread, "TextFrame"), ...all(spread, "Rectangle"), ...all(spread, "GraphicLine")];
     for (const f of frames) {
       const self = attr(f, "Self");
       if (seen.has(self)) problems.push(`${sn}: duplicate id ${self}`);

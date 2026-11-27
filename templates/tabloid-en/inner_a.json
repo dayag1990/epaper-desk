@@ -80,125 +80,28 @@
       "ratio": 2.6
     },
     {
-      "id": "story_col_span-2-2",
-      "span": 2,
-      "cols": 2,
-      "kind": "story",
-      "words_min": 0,
-      "words_max": 9999,
-      "image": true,
-      "hs": 0.9,
-      "ratio": 1.25
-    },
-    {
-      "id": "story_col_span-3-3",
+      "id": "story_col_span-3-2",
       "span": 3,
       "cols": 3,
       "kind": "story",
       "words_min": 0,
       "words_max": 9999,
       "image": true,
-      "hs": 1.1,
-      "ratio": 1.9
-    },
-    {
-      "id": "story_col_span-3-4",
-      "span": 3,
-      "cols": 3,
-      "kind": "story",
-      "words_min": 0,
-      "words_max": 9999,
-      "image": true,
-      "hs": 1.1,
-      "ratio": 1.9
-    },
-    {
-      "id": "story_col_span-2-5",
-      "span": 2,
-      "cols": 2,
-      "kind": "story",
-      "words_min": 0,
-      "words_max": 9999,
-      "image": true,
-      "hs": 0.9,
-      "ratio": 1.25
-    },
-    {
-      "id": "story_col_span-2-6",
-      "span": 2,
-      "cols": 2,
-      "kind": "story",
-      "words_min": 0,
-      "words_max": 9999,
-      "image": true,
-      "hs": 0.9,
-      "ratio": 1.25
-    },
-    {
-      "id": "story_col_span-2-7",
-      "span": 2,
-      "cols": 2,
-      "kind": "story",
-      "words_min": 0,
-      "words_max": 9999,
-      "image": true,
-      "hs": 0.9,
-      "ratio": 1.25
-    },
-    {
-      "id": "story_col_span-3-8",
-      "span": 3,
-      "cols": 3,
-      "kind": "story",
-      "words_min": 0,
-      "words_max": 9999,
-      "image": true,
+      "tier": 2,
       "hs": 1.0,
-      "ratio": 1.8
+      "ratio": 2.0
     },
     {
-      "id": "story_col_span-3-9",
-      "span": 3,
-      "cols": 3,
-      "kind": "story",
-      "words_min": 0,
-      "words_max": 9999,
-      "image": true,
-      "hs": 1.0,
-      "ratio": 1.8
-    },
-    {
-      "id": "story_col_span-2-10",
+      "id": "story_col_span-2-3",
       "span": 2,
-      "cols": 2,
+      "cols": 1,
       "kind": "story",
       "words_min": 0,
       "words_max": 9999,
       "image": true,
-      "hs": 0.9,
-      "ratio": 1.25
-    },
-    {
-      "id": "story_col_span-2-11",
-      "span": 2,
-      "cols": 2,
-      "kind": "story",
-      "words_min": 0,
-      "words_max": 9999,
-      "image": true,
-      "hs": 0.9,
-      "ratio": 1.25
-    },
-    {
-      "id": "story_col_span-2-12",
-      "span": 2,
-      "cols": 2,
-      "kind": "story",
-      "words_min": 0,
-      "words_max": 9999,
-      "image": true,
-      "hs": 0.9,
-      "ratio": 1.25
+      "tier": 3,
+      "hs": 0.85,
+      "ratio": 1.5
     },
     {
       "id": "sidebar",

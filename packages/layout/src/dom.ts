@@ -71,6 +71,14 @@ export interface RawFrame {
   natH?: number;
   focal?: [number, number];
   cutout?: boolean;
+  /** newspaper finish (see D4): id suffix for a second frame of the same role, block style, drop cap, run-in dateline, rule kind, colours */
+  sfx?: string;
+  block?: "brief" | "quote" | "panel";
+  dropcap?: boolean;
+  dateline?: string;
+  rule?: "hair" | "heavy" | "double";
+  color?: string;
+  tint?: string;
   /** frame width as a fraction of page width, used for the dpi rule */
 }
 export interface RawPage {
@@ -90,19 +98,61 @@ export function domFrames(): RawPage {
   const cs = (el: Element) => getComputedStyle(el);
   const fam = (el: Element) => cs(el).fontFamily.split(",")[0]!.replace(/["']/g, "").trim();
   const frames: RawFrame[] = [];
+  const hex = (c: string): string | undefined => {
+    const m = /rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/.exec(c);
+    if (!m || (m[4] !== undefined && +m[4] === 0)) return undefined;
+    return "#" + [m[1], m[2], m[3]].map((v) => (+v).toString(16).padStart(2, "0")).join("");
+  };
+  const ruled = page.classList.contains("ruled");
+  /** an element the style hides (a pull quote prints no body) is not a frame */
+  const shown = <T extends Element>(e: T | null): T | null => (e && getComputedStyle(e).display !== "none" ? e : null);
+  const line = (item: string, sfx: string, role: "rule", x: number, y: number, w: number, h: number, rule: "hair" | "heavy" | "double", color: string | undefined) =>
+    frames.push({ item, role, sfx, x: (x - pr.left) / pr.width, y: (y - pr.top) / pr.width, w: w / pr.width, h: h / pr.width, rule, color });
+  const kindOf = (px: number, style: string): "hair" | "heavy" | "double" => (style === "double" ? "double" : px >= 3 ? "heavy" : "hair");
   const mast = page.querySelector(".mast");
   if (mast) frames.push({ item: "it_furniture", role: "masthead", ...rect(mast), fontPx: parseFloat(cs(mast.querySelector(".name") ?? mast).fontSize), fontFamily: fam(mast.querySelector(".name") ?? mast), text: (mast.textContent ?? "").replace(/\s+/g, " ").trim() });
-  const strip = page.querySelector(".strip");
-  if (strip) frames.push({ item: "it_furniture", role: "strip", ...rect(strip), fontPx: parseFloat(cs(strip).fontSize), fontFamily: fam(strip), text: (strip.textContent ?? "").replace(/\s+/g, " ").trim() });
+  const strip = page.querySelector<HTMLElement>(".strip");
+  if (strip) {
+    frames.push({ item: "it_furniture", role: "strip", ...rect(strip), fontPx: parseFloat(cs(strip).fontSize), fontFamily: fam(strip), text: (strip.textContent ?? "").replace(/\s+/g, " ").trim() });
+    if (ruled) {
+      const r = strip.getBoundingClientRect(), c = cs(strip);
+      const tw = parseFloat(c.borderTopWidth), bw = parseFloat(c.borderBottomWidth);
+      if (tw > 0) line("it_furniture", "_top", "rule", r.left, r.top + tw / 2, r.width, 0, kindOf(tw, c.borderTopStyle), hex(c.borderTopColor));
+      if (bw > 0) line("it_furniture", "_bottom", "rule", r.left, r.bottom - bw / 2, r.width, 0, kindOf(bw, c.borderBottomStyle), hex(c.borderBottomColor));
+    }
+  }
   page.querySelectorAll<HTMLElement>(".story").forEach((s) => {
     const item = s.dataset.item ?? "";
-    const k = s.querySelector(".kicker");
-    if (k) frames.push({ item, role: "kicker", ...rect(k), fontPx: parseFloat(cs(k).fontSize), fontFamily: fam(k), text: (k.textContent ?? "").trim() });
+    const block = (s.dataset.block as "brief" | "quote" | "panel" | undefined) || undefined;
+    const sr = s.getBoundingClientRect(), sc = cs(s);
+    if (ruled && s.dataset.kind !== "ad") {
+      const tw = parseFloat(sc.borderTopWidth), bw = parseFloat(sc.borderBottomWidth);
+      if (block === "brief" || block === "panel") {
+        const tint = block === "panel" ? hex(sc.backgroundColor) : undefined;
+        frames.push({ item, role: "box", sfx: "", ...rect(s), block, color: hex(sc.borderTopColor), ...(tint ? { tint } : {}) });
+      }
+      if (block !== "brief" && tw > 0) line(item, "", "rule", sr.left, sr.top + tw / 2, sr.width, 0, kindOf(tw, sc.borderTopStyle), hex(sc.borderTopColor));
+      if (block === "quote" && bw > 0) line(item, "2", "rule", sr.left, sr.bottom - bw / 2, sr.width, 0, kindOf(bw, sc.borderBottomStyle), hex(sc.borderBottomColor));
+      const pb = getComputedStyle(s, "::before");
+      if (pb.content !== "none" && pb.display !== "none" && parseFloat(pb.width) > 0) {
+        const cg = parseFloat(getComputedStyle(page).getPropertyValue("--cg")) || 0;
+        const k0 = pr.width / page.offsetWidth;
+        line(item, "_v", "rule", sr.left - (cg * k0) / 2, sr.top, 0, sr.height, "hair", hex(pb.backgroundColor));
+      }
+    }
+    s.querySelectorAll<HTMLElement>(".jump").forEach((j) => shown(j) && frames.push({ item, role: "jump", sfx: j.classList.contains("from") ? "_from" : "_to", ...rect(j), fontPx: parseFloat(cs(j).fontSize), fontFamily: fam(j), text: (j.textContent ?? "").trim(), block }));
+    const by = shown(s.querySelector<HTMLElement>(".byline"));
+    if (by) {
+      const dl = by.dataset.dl ? ` \u00b7 ${by.dataset.dl}` : "";
+      frames.push({ item, role: "byline", ...rect(by), fontPx: parseFloat(cs(by).fontSize), fontFamily: fam(by), style: by.dataset.style, text: ((by.textContent ?? "").trim() + dl).trim(), block });
+    }
+    const k = shown(s.querySelector(".kicker"));
+    if (k) frames.push({ item, role: "kicker", ...rect(k), fontPx: parseFloat(cs(k).fontSize), fontFamily: fam(k), text: (k.textContent ?? "").trim(), block });
     const h = s.querySelector<HTMLElement>(".head");
-    if (h) frames.push({ item, role: "head", ...rect(h), fontPx: parseFloat(cs(h).fontSize), fontFamily: fam(h), style: h.dataset.style, text: (h.textContent ?? "").trim() });
+    if (h) frames.push({ item, role: "head", ...rect(h), fontPx: parseFloat(cs(h).fontSize), fontFamily: fam(h), style: h.dataset.style, text: (h.textContent ?? "").trim(), block });
     const sub = s.querySelector<HTMLElement>(".sub");
-    if (sub) frames.push({ item, role: "sub", ...rect(sub), fontPx: parseFloat(cs(sub).fontSize), fontFamily: fam(sub), style: sub.dataset.style, text: (sub.textContent ?? "").trim() });
-    const fig = s.querySelector<HTMLElement>(".fig");
+    if (sub) frames.push({ item, role: "sub", ...rect(sub), fontPx: parseFloat(cs(sub).fontSize), fontFamily: fam(sub), style: sub.dataset.style, text: (sub.textContent ?? "").trim(), block });
+    const fig = shown(s.querySelector<HTMLElement>(".fig"));
     if (fig) {
       const im = fig.querySelector("img");
       frames.push({
@@ -112,15 +162,16 @@ export function domFrames(): RawPage {
         focal: im ? ((im.style.objectPosition || "50% 50%").split(" ").map((v) => parseFloat(v) / 100) as [number, number]) : [0.5, 0.5],
       });
     }
-    const cap = s.querySelector<HTMLElement>(".cap");
+    const cap = shown(s.querySelector<HTMLElement>(".cap"));
     if (cap) frames.push({ item, role: "caption", ...rect(cap), fontPx: parseFloat(cs(cap).fontSize), fontFamily: fam(cap), text: (cap.textContent ?? "").replace(/\s+/g, " ").trim() });
-    const b = s.querySelector<HTMLElement>(".body");
+    const b = shown(s.querySelector<HTMLElement>(".body"));
     if (b) {
       const bs = cs(b);
       frames.push({
         item, role: "body", ...rect(b), fontPx: parseFloat(bs.fontSize), fontFamily: fam(b), style: b.dataset.style,
         cols: parseInt(bs.columnCount, 10) || 1, gutterPx: parseFloat(bs.columnGap) || 0,
         paras: Array.from(b.querySelectorAll("p")).map((p) => (p.textContent ?? "").trim()).filter(Boolean),
+        block, dropcap: s.classList.contains("dc") || undefined, dateline: b.querySelector<HTMLElement>("p[data-dl]")?.dataset.dl || undefined,
       });
     }
   });
@@ -138,6 +189,42 @@ export async function domReady(): Promise<void> {
   await Promise.all(
     Array.from(document.images).map((i) => (i.complete ? 0 : new Promise((r) => { i.onload = i.onerror = () => r(0); }))),
   );
+  // Cut-out photos: the text wraps round the OUTLINE of the picture. The outline is read from the PNG's alpha channel (a canvas,
+  // so it needs a picture the page may read: a data: URI, the same origin, or CORS headers). The right edge of the opaque
+  // part, row by row, becomes a CSS polygon in % of the figure (a left float: the text runs down its right side), so the wrap
+  // scales with the figure and is the same in the editor, the headless render and the PDF. When the picture cannot be read
+  // (another origin without CORS, no alpha at all) nothing is set and the float's own rectangle is the shape.
+  document.querySelectorAll<HTMLElement>(".fig.cutout").forEach((fig) => {
+    const img = fig.querySelector("img");
+    if (!img || !img.naturalWidth || !img.naturalHeight) return;
+    try {
+      const sw = Math.min(img.naturalWidth, 200);
+      const sh = Math.max(1, Math.round((img.naturalHeight * sw) / img.naturalWidth));
+      const cv = document.createElement("canvas");
+      cv.width = sw; cv.height = sh;
+      const cx = cv.getContext("2d");
+      if (!cx) return;
+      cx.drawImage(img, 0, 0, sw, sh);
+      const d = cx.getImageData(0, 0, sw, sh).data;
+      const rows = Math.min(sh, 40);
+      const pts: string[] = ["0% 0%"];
+      let any = false, opaque = true;
+      for (let r = 0; r < rows; r++) {
+        // widest opaque extent of the rows of this band (top .. bottom of the band), so no part of the outline pokes out of the polygon
+        const y0 = Math.floor((r * sh) / rows), y1 = Math.max(y0 + 1, Math.floor(((r + 1) * sh) / rows));
+        let right = -1;
+        for (let y = y0; y < y1; y++) for (let x = sw - 1; x > right; x--) if (d[(y * sw + x) * 4 + 3]! > 76) { right = x; break; }
+        if (right >= 0) any = true; else opaque = false;
+        if (right < sw - 1) opaque = false;
+        const xr = right < 0 ? 0 : ((right + 1) / sw) * 100;
+        pts.push(`${xr.toFixed(2)}% ${((y0 / sh) * 100).toFixed(2)}%`, `${xr.toFixed(2)}% ${((y1 / sh) * 100).toFixed(2)}%`);
+      }
+      pts.push("0% 100%");
+      if (any) fig.style.setProperty("shape-outside", opaque ? "border-box" : `polygon(${pts.join(",")}) border-box`);
+    } catch {
+      /* tainted canvas: keep the rectangle */
+    }
+  });
 }
 
 export interface DomLine {

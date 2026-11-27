@@ -5,7 +5,7 @@ import { chromium, type Browser } from "playwright";
 import { PDFDocument } from "pdf-lib";
 import type { Article, PageDoc } from "@epaper/core";
 import { SCREEN_IMAGES, recompressPdfImages, type ScreenImageOptions } from "./pdf-images.js";
-import { SERVER_FONT_BASE, installFonts, renderDocument, renderPage, type Template } from "@epaper/layout";
+import { SERVER_FONT_BASE, domReady, installFonts, renderDocument, renderPage, type Template } from "@epaper/layout";
 
 export interface EditionPage { doc: PageDoc; template: Template }
 export interface ScreenPdfOptions {
@@ -92,7 +92,8 @@ async function printPdf(browser: Browser, html: string, w_mm: number, h_mm: numb
     await installFonts(page);
     await page.setContent(html, { waitUntil: "load" });
     // faces load lazily: ask for each one, then wait, so the PDF is never printed with a fallback font
-    await page.evaluate(() => { const faces: FontFace[] = []; document.fonts.forEach((f) => faces.push(f)); return Promise.all(faces.map((f) => f.load())).then(() => document.fonts.ready).then(() => undefined); });
+    // (also reads every cut-out photo's outline, so the PDF wraps text round it exactly as the editor does)
+    await page.evaluate(domReady);
     const raw = await page.pdf({ width: mm(w_mm), height: mm(h_mm), preferCSSPageSize: true, printBackground: true, margin: { top: "0", right: "0", bottom: "0", left: "0" } });
     return await exactBoxes(images ? (await recompressPdfImages(raw, images)).bytes : raw, w_mm, h_mm);
   } finally {
