@@ -106,10 +106,10 @@ describe("cut-out photo wraps text around its outline (real Chromium)", () => {
   it("text enters the transparent corners of the figure; an opaque picture falls back to its rectangle; the figure overhangs the frame", async () => {
     const run = async (kind: "alpha" | "opaque") => {
       const { doc, template, articles } = showcase({ cutout: kind });
-      await eng.load({ ...doc, items: [doc.items[0]!] }, template, articles);
+      await eng.load(doc, template, articles);
       return eng["page"].evaluate(() => {
-        const fig = document.querySelector<HTMLElement>(".fig.cutout")!, story = document.querySelector<HTMLElement>(".story")!;
-        const fr = fig.getBoundingClientRect(), sr = story.getBoundingClientRect();
+        const box = document.querySelector<HTMLElement>(".cutbox")!, fig = box.querySelector<HTMLElement>(".fig.cutout")!, story = document.querySelector<HTMLElement>(".story")!;
+        const fr = box.getBoundingClientRect(), sr = story.getBoundingClientRect();
         const p = document.querySelector(".body p")!;
         const tn = Array.from(p.childNodes).find((n) => n.nodeType === 3) as Text;
         let inCorner = 0, overlapRows = 0;
@@ -120,10 +120,11 @@ describe("cut-out photo wraps text around its outline (real Chromium)", () => {
           const rowOverlap = b.bottom > fr.top && b.top < fr.bottom;
           if (rowOverlap) { overlapRows++; if (b.left < fr.right - 4 && b.right > fr.left) inCorner++; }
         }
-        return { overhang: sr.left - fr.left, figW: fr.width, overlapRows, inCorner, shape: getComputedStyle(fig).shapeOutside };
+        return { overhang: sr.left - fr.left, figW: fr.width, overlapRows, inCorner, shape: getComputedStyle(box).shapeOutside, capBelow: box.querySelector(".cap")!.getBoundingClientRect().top >= fig.getBoundingClientRect().bottom - 1 };
       });
     };
     const a = await run("alpha"), o = await run("opaque");
+    expect(a.capBelow).toBe(true); // the caption is right under the photo
     expect(a.shape).toMatch(/^polygon\(/); // the outline read from the alpha channel
     expect(o.shape).not.toMatch(/^polygon\(/); // a solid picture: the rectangle
     expect(a.overhang).toBeGreaterThanOrEqual(5); // a few px into the gutter

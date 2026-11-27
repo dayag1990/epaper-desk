@@ -74,7 +74,7 @@ function figHtml(item: PageItem, src: string | null, isAd: boolean, editable: bo
 }
 
 /**
- * A cut-out photo (a PNG with a transparent background) sits INSIDE the text columns as a float, so the body text runs round its
+ * A cut-out photo (a PNG with a transparent background) sits INSIDE the text columns as a float (the "cutbox": photo + caption), so the body text runs round its
  * outline: domReady() reads the PNG's alpha channel and sets `shape-outside: polygon(...)` on the figure (see dom.ts); where it
  * cannot (the picture is on another origin without CORS headers, or has no alpha) the float's own rectangle is the shape, which is
  * the rectangular fallback. (CSS `shape-outside: url()` was tried first: Chromium places the image at its natural pixel size,
@@ -83,8 +83,9 @@ function figHtml(item: PageItem, src: string | null, isAd: boolean, editable: bo
  */
 function cutoutHtml(item: PageItem, src: string, cap: string): string {
   const img = item.image!;
-  const fig = `<div class="fig cutout${cap ? " has-cap" : ""}" data-noedit="1" data-asset="${esc(img.asset_id)}"><img alt="" src="${esc(src)}"></div>`;
-  return fig + (cap ? cap.replace('class="cap"', 'class="cap cutcap" data-noedit="1"') : "");
+  const fig = `<div class="fig cutout${cap ? " has-cap" : ""}" data-asset="${esc(img.asset_id)}"><img alt="" src="${esc(src)}"></div>`;
+  // one float holds the picture and its caption, so the caption always sits right under the photo and wraps with it
+  return `<div class="cutbox" data-noedit="1">${fig}${cap ? cap.replace('class="cap"', 'class="cap cutcap"') : ""}</div>`;
 }
 
 const DASH_END = /[\u2014\u2013-]\s*$/;

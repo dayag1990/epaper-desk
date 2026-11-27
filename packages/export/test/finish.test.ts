@@ -34,10 +34,10 @@ describe("the finish in the screen PDF and the e-paper text layer", () => {
     expect(buildEdition).toBeTypeOf("function");
   });
   it("the cut-out wrap in the PDF is the wrap the editor shows: the same lines start at the same places, to 2 px", async () => {
-    await engine.load({ ...sc.doc, items: [sc.doc.items[0]!] }, sc.template, sc.articles);
-    const figRight = await engine["page"].evaluate(() => document.querySelector(".fig.cutout")!.getBoundingClientRect().right - document.querySelector(".page")!.getBoundingClientRect().left);
+    await engine.load(sc.doc, sc.template, sc.articles);
+    const figRight = await engine["page"].evaluate(() => document.querySelector(".cutbox")!.getBoundingClientRect().right - document.querySelector(".page")!.getBoundingClientRect().left);
     const dom = (await engine.lines()).filter((l) => l.key === "it_lead.body.0" || l.key === "it_lead.body.1");
-    const solo = await exportScreenPdf({ paper: "solo", date: "2026-11-27", pages: [{ doc: { ...sc.doc, items: [sc.doc.items[0]!] }, template: sc.template }], articles: sc.articles, browser, outDir: tmp });
+    const solo = await exportScreenPdf({ paper: "solo", date: "2026-11-27", pages: [{ doc: sc.doc, template: sc.template }], articles: sc.articles, browser, outDir: tmp });
     const xml = run("pdftotext", "-bbox-layout", join(tmp, solo.edition.name), "-");
     const k = sc.template.canvas_px / ((sc.doc.page.w_mm / 25.4) * 72); // canvas px per pt
     const words = [...xml.matchAll(/<word xMin="([\d.]+)" yMin="([\d.]+)" xMax="[\d.]+" yMax="[\d.]+">([^<]*)<\/word>/g)].map((m) => ({ x: +m[1]! * k, y: +m[2]! * k, t: m[3]! }));

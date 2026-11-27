@@ -194,8 +194,10 @@ export async function domReady(): Promise<void> {
   // part, row by row, becomes a CSS polygon in % of the figure (a left float: the text runs down its right side), so the wrap
   // scales with the figure and is the same in the editor, the headless render and the PDF. When the picture cannot be read
   // (another origin without CORS, no alpha at all) nothing is set and the float's own rectangle is the shape.
-  document.querySelectorAll<HTMLElement>(".fig.cutout").forEach((fig) => {
-    const img = fig.querySelector("img");
+  document.querySelectorAll<HTMLElement>(".cutbox").forEach((box) => {
+    const fig = box.querySelector<HTMLElement>(".fig.cutout");
+    const img = fig?.querySelector("img");
+    if (!fig) return;
     if (!img || !img.naturalWidth || !img.naturalHeight) return;
     try {
       const sw = Math.min(img.naturalWidth, 200);
@@ -207,6 +209,7 @@ export async function domReady(): Promise<void> {
       cx.drawImage(img, 0, 0, sw, sh);
       const d = cx.getImageData(0, 0, sw, sh).data;
       const rows = Math.min(sh, 40);
+      const imgPct = box.offsetHeight ? Math.min(100, (fig.offsetHeight / box.offsetHeight) * 100) : 100; // the photo's share of the float's height
       const pts: string[] = ["0% 0%"];
       let any = false, opaque = true;
       for (let r = 0; r < rows; r++) {
@@ -217,10 +220,11 @@ export async function domReady(): Promise<void> {
         if (right >= 0) any = true; else opaque = false;
         if (right < sw - 1) opaque = false;
         const xr = right < 0 ? 0 : ((right + 1) / sw) * 100;
-        pts.push(`${xr.toFixed(2)}% ${((y0 / sh) * 100).toFixed(2)}%`, `${xr.toFixed(2)}% ${((y1 / sh) * 100).toFixed(2)}%`);
+        pts.push(`${xr.toFixed(2)}% ${((y0 / sh) * imgPct).toFixed(2)}%`, `${xr.toFixed(2)}% ${((y1 / sh) * imgPct).toFixed(2)}%`);
       }
-      pts.push("0% 100%");
-      if (any) fig.style.setProperty("shape-outside", opaque ? "border-box" : `polygon(${pts.join(",")}) border-box`);
+      // the caption under the photo is a plain rectangle of the same float
+      pts.push(`100% ${imgPct.toFixed(2)}%`, "100% 100%", "0% 100%");
+      if (any) box.style.setProperty("shape-outside", opaque ? "border-box" : `polygon(${pts.join(",")}) border-box`);
     } catch {
       /* tainted canvas: keep the rectangle */
     }
@@ -255,7 +259,7 @@ export function domLines(): DomLine[] {
   page.querySelectorAll(".mast .name, .mast .tag, .strip > *").forEach((el, i) => els.push({ el, key: `furniture.${el.className || el.tagName.toLowerCase()}.${i}` }));
   page.querySelectorAll<HTMLElement>(".story").forEach((s) => {
     const item = s.dataset.item ?? "";
-    s.querySelectorAll(".kicker, .head, .sub, .cap, .cap .credit").forEach((el) => els.push({ el, key: `${item}.${el.className.split(" ")[0]}` }));
+    s.querySelectorAll(".kicker, .head, .sub, .byline, .jump, .cap, .cap .credit").forEach((el) => els.push({ el, key: `${item}.${el.className.split(" ")[0]}` }));
     s.querySelectorAll(".body p").forEach((el, i) => els.push({ el, key: `${item}.body.${i}` }));
   });
   for (const { el, key } of els) {

@@ -92,10 +92,11 @@ function furnitureCss(t: Template): string {
 .body p[data-dl]::before{content:attr(data-dl) " ";font-weight:700;font-variant-caps:all-small-caps}
 :lang(en) .body p[data-dl]::before{letter-spacing:.04em}
 .body .dc{float:left;font-family:${t.fonts.head};font-weight:800;font-size:calc(var(--fs) * ${(lines * 1.62 * 0.96 / 0.7).toFixed(2)});line-height:.78;margin:.06em .1em -.06em 0;padding:0;text-indent:0;color:var(--red)}
-.fig.cutout{float:left;width:calc(var(--cw,88%) + 10px);margin:0 12px 6px -10px;aspect-ratio:auto;background:none;overflow:visible;shape-margin:7px}
+.cutbox{float:left;width:min(calc(var(--cw,88%) + 10px),300px);margin:0 12px 8px -10px;shape-margin:7px}
+.fig.cutout{margin:0;aspect-ratio:auto;background:none;overflow:visible}
 .fig.cutout img{width:100%;height:auto;object-fit:fill;display:block}
 .fig.cutout.has-cap{margin-bottom:0}
-.cap.cutcap{float:left;clear:left;width:calc(var(--cw,88%) + 10px);margin:0 12px 8px -10px}
+.cap.cutcap{margin:0}
 .body [data-noedit]{user-select:none;-webkit-user-select:none}
 .story.has-cut .body p:first-of-type{text-indent:0}`;
 }
