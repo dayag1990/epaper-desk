@@ -1812,7 +1812,7 @@
 <text font-size="17" fill="#10131A"><tspan x="747" y="2377.6">Files on disk, named by</tspan><tspan x="747" y="2400.6">content hash, written once,</tspan><tspan x="747" y="2423.6">never changed. S3 driver for</tspan><tspan x="747" y="2446.6">cloud buckets.</tspan></text>
 <line x1="744" y1="2463.4" x2="986" y2="2463.4" stroke="#C3CAD9" stroke-width="2"/>
 <text x="747" y="2490.9" font-size="15" fill="#1746C7" font-weight="700" letter-spacing="1.2">JOB QUEUE</text>
-<text font-size="17" fill="#10131A"><tspan x="747" y="2516.4">Inside Postgres, no extra</tspan><tspan x="747" y="2539.4">server: ingest · assets · ai ·</tspan><tspan x="747" y="2562.4">layout · export · epaper</tspan></text>
+<text font-size="17" fill="#10131A"><tspan x="747" y="2516.4">Postgres queue (pg-boss), no</tspan><tspan x="747" y="2539.4">Redis: ingest · assets · ai ·</tspan><tspan x="747" y="2562.4">layout · export · epaper</tspan></text>
 <line x1="744" y1="2579.3" x2="986" y2="2579.3" stroke="#C3CAD9" stroke-width="2"/>
 <text x="747" y="2606.7" font-size="15" fill="#1746C7" font-weight="700" letter-spacing="1.2">VERSIONS + AUDIT</text>
 <text font-size="17" fill="#10131A"><tspan x="747" y="2632.3">Every page save is a version.</tspan><tspan x="747" y="2655.3">Every write is logged.</tspan></text>

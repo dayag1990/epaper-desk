@@ -1,4 +1,6 @@
 # E-Paper Desk build
+> **FEATURE FREEZE since 2026-11-27 (owner instruction):** only these jobs run: (1) Tamil BRIEF P1 (BLOCKED: the Tamil zip with BRIEF.md is not on the server), (2) real-newspaper finish, (3) Forme colours + joined-up product, (4) architecture SVG says Postgres queue: DONE 2026-11-27 (the copy in the repo already said "no Redis" in its banner and spec; the JOB QUEUE box now reads "Postgres queue (pg-boss), no Redis"; Redis appears only in the not-building list; if your copy still shows Redis it is an older file: use /srv/epaper/desk/epaper-desk-architecture.svg). Later, not now: Tamil P2 OCR, domains + HTTPS, Fable review of the demo path. Work happens on branches feat/finish and feat/theme (worktrees /srv/epaper/wt-finish, wt-theme); main gets only green merges.
+
 Start: 2026-11-23 22:58 IST (2026-11-23 17:28 UTC) · Demo-ready target: 2026-11-25 22:58 IST (2026-11-25 17:28 UTC) · Contract deadline: 2026-11-26 22:58 IST (2026-11-26 17:28 UTC) · Hour: 0 of 48 · Block: FLOOR
 
 ## Done                (module · the check that passed)
