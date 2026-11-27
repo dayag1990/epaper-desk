@@ -3,6 +3,8 @@ import react from "@vitejs/plugin-react";
 import { fileURLToPath } from "node:url";
 
 const layoutSrc = fileURLToPath(new URL("../../packages/layout/src", import.meta.url));
+const themeSrc = fileURLToPath(new URL("../../packages/theme/src", import.meta.url));
+const themeCss = fileURLToPath(new URL("../../packages/theme/theme.css", import.meta.url));
 const coreSrc = fileURLToPath(new URL("../../packages/core/src/index.ts", import.meta.url));
 
 // The editor uses the SAME renderPage/paperCss/domFill/domFrames/domReady source as the server.
@@ -10,9 +12,13 @@ const coreSrc = fileURLToPath(new URL("../../packages/core/src/index.ts", import
 export default defineConfig({
   plugins: [react()],
   resolve: {
+    dedupe: ["react", "react-dom"],
     alias: [
       { find: /^@epaper\/layout\/src\/(.*)\.js$/, replacement: layoutSrc + "/$1.ts" },
       { find: "@epaper/core", replacement: coreSrc },
+      { find: /^@epaper\/theme\/react$/, replacement: `${themeSrc}/react.tsx` },
+      { find: /^@epaper\/theme\/theme\.css$/, replacement: themeCss },
+      { find: /^@epaper\/theme$/, replacement: `${themeSrc}/index.ts` },
     ],
   },
   server: { host: "127.0.0.1", port: 8182, fs: { allow: ["../.."] } },

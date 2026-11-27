@@ -5,6 +5,7 @@ import { EditionPicker } from "./PaperBits";
 import { loadConfig } from "./config";
 import { IdbDrafts } from "./draft";
 import { EditorStore } from "./store";
+import "@epaper/theme/theme.css";
 import "./style.css";
 
 const cfg = loadConfig();

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { TopBar, useAppLinks } from "@epaper/theme/react";
 import type { Api } from "./api";
 import { ApiError, plainError } from "./errors";
 import type { EditionListItem, Me } from "./types";
@@ -47,13 +48,14 @@ export function EditionPicker({ api }: { api: Api }) {
     try { await api.switchPaper(slug); goToEditionList(); } catch (e) { setSwErr(switchError(e)); setBusy(false); }
   };
   const cur = me?.papers?.find((p) => p.current);
+  const links = useAppLinks();
+  const signOut = async () => { try { await api.logout(); } catch { /* the server clears the cookies; nothing to undo here */ } location.assign(links.admin); };
   return (
-    <div className="picker">
-      <header className="top">
-        <div className="title" data-testid="picker-paper">{cur ? cur.name : ""}</div>
-        <div className="spacer" />
+    <div className="picker ep-app">
+      <TopBar app="editor" links={links} user={me ? { name: me.user.name || me.user.email || "You", email: me.user.email } : null} isOwner={me?.role === "owner"} onSignOut={() => void signOut()}>
+        <span className="title" data-testid="picker-paper">{cur ? cur.name : ""}</span>
         <PaperSwitcher me={me} onPick={(s) => void pick(s)} busy={busy} error={swErr} />
-      </header>
+      </TopBar>
       <main className="center">
         <h1>Editions</h1>
         {err && <p className="err" role="alert">{err}</p>}

@@ -1,6 +1,6 @@
 import type { PageDoc } from "@epaper/core";
 import { ApiError } from "./errors";
-import type { AssetRecord, EditionListItem, EditionRecord, FitReportLite, LockInfo, Me, VersionRecord } from "./types";
+import type { AssetRecord, EditionListItem, EditionRecord, FitReportLite, LockInfo, Me, PageRecord, VersionRecord } from "./types";
 
 /**
  * Client for the /v1 routes the editor uses. Route list = docs/build-spec.json `api`, exactly:
@@ -59,6 +59,12 @@ export class Api {
   }
 
   me = () => this.req<Me>("GET", "/v1/me");
+  /** Sign out of the API (the same call clears the shared sign-in cookie, so the ops desk is signed out too). */
+  logout = () => this.req<{ ok: boolean }>("POST", "/v1/auth/logout", {});
+  /** One page as the server has it now (used when someone else changed it). */
+  page = (id: string) => this.req<PageRecord>("GET", `/v1/pages/${enc(id)}`);
+  /** Where the live-updates stream is (Server-Sent Events). */
+  get eventsUrl() { return `${this.o.base}/v1/events`; }
   /** Move this session to another paper the person belongs to (the server answers 403 in plain words otherwise). */
   switchPaper = (paper: string) => this.req<Me>("POST", "/v1/auth/switch", { paper });
   editions = async () => (await this.req<{ items: EditionListItem[] }>("GET", "/v1/editions")).items;

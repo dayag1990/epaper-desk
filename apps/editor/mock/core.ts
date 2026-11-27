@@ -20,13 +20,14 @@ export interface MockRes {
   status: number;
   json?: unknown;
 }
-interface PageRow { paper: string; id: string; no: number; doc: PageDoc; rev: number; status: string; template_id: string; versions: { rev: number; at: string; user: Person; doc: PageDoc }[]; lock?: { user: Person; until: number }; deleted?: boolean }
+interface PageRow { paper: string; id: string; no: number; doc: PageDoc; rev: number; status: string; template_id: string; versions: { rev: number; at: string; user: Person; doc: PageDoc }[]; lock?: { user: Person; until: number }; deleted?: boolean; fit?: number }
 
 export const USERS: Record<string, MockUser & { papers: string[] }> = {
   ana: { id: "usr_ana", name: "Ana Costa", role: "editor", papers: ["riverton-herald"] },
   bea: { id: "usr_bea", name: "Bea Jones", role: "editor", papers: ["riverton-herald"] },
   vic: { id: "usr_vic", name: "Vic Viewer", role: "viewer", papers: ["riverton-herald"] },
   mia: { id: "usr_mia", name: "Mia Both", role: "editor", papers: ["riverton-herald", "thenpothigai"] }, // belongs to both papers
+  olga: { id: "usr_olga", name: "Olga Owner", role: "owner", papers: ["riverton-herald"] },
 };
 export const PAPERS: Record<string, { name: string; lang: string; script: string }> = {
   "riverton-herald": { name: "Riverton Herald", lang: "en", script: "Latn" },
@@ -37,6 +38,7 @@ export class MockBackend {
   pages = new Map<string, PageRow>();
   assets = new Map<string, { id: string; src: string; parent_id?: string | null }>();
   aiEnabled = false;
+  sseOn = true;
   cutoutBuilt = false;
   lockTtlMs = 5 * 60_000;
   now = () => Date.now();
@@ -56,6 +58,7 @@ export class MockBackend {
     this.pages.clear();
     this.assets.clear();
     this.aiEnabled = false;
+    this.sseOn = true;
     this.cutoutBuilt = false;
     this.current.clear();
     for (const { paper, seed } of this.seeds()) for (const p of seed.pages) {
@@ -71,6 +74,7 @@ export class MockBackend {
     if (path === "/__config" && r.method === "POST") {
       if (r.body?.ai !== undefined) this.aiEnabled = !!r.body.ai;
       if (r.body?.cutout !== undefined) this.cutoutBuilt = !!r.body.cutout;
+      if (r.body?.sse !== undefined) this.sseOn = !!r.body.sse;
       if (r.body?.lockTtlMs !== undefined) this.lockTtlMs = r.body.lockTtlMs;
       return { status: 200, json: { ok: true } };
     }
@@ -79,6 +83,7 @@ export class MockBackend {
     let m: RegExpExecArray | null;
     const here = this.paperOf(u);
     if (path === "/v1/me" && r.method === "GET") return { status: 200, json: { user: { id: u.id, name: u.name }, role: u.role, ai_enabled: this.aiEnabled, papers: this.papersFor(u) } };
+    if (path === "/v1/auth/logout" && r.method === "POST") return { status: 200, json: { ok: true } };
     if (path === "/v1/me/papers" && r.method === "GET") return { status: 200, json: { items: this.papersFor(u) } };
     if (path === "/v1/auth/switch" && r.method === "POST") {
       const to = String(r.body?.paper ?? "");
@@ -117,9 +122,19 @@ export class MockBackend {
     return err(404, "not_found", `No route ${r.method} ${path}`);
   }
 
+  /** Test hook: another person saved this page (new headline) while this editor was open. Returns the event the real server would announce. */
+  externalSave(id: string, headline: string, fill: number) {
+    const p = this.pages.get(id)!;
+    p.rev += 1; p.fit = fill;
+    const it = p.doc.items.find((i) => i.text);
+    p.doc = { ...structuredClone(p.doc), rev: p.rev, items: p.doc.items.map((i) => (i === it ? { ...i, text: { ...i.text!, head: headline } } : i)) };
+    p.versions.push({ rev: p.rev, at: new Date(this.now()).toISOString(), user: { id: "usr_bea", name: "Bea Jones" }, doc: structuredClone(p.doc) });
+    return { type: "page.updated", page_id: p.id, edition_id: this.seed.edition.id, rev: p.rev, fill, status: p.status, by: "usr_bea" };
+  }
+
   private pageOut(p: PageRow) {
     this.expire(p);
-    return { id: p.id, no: p.no, doc: p.doc, rev: p.rev, status: p.status, fit_pct: null, locked_by: p.lock?.user ?? null, template_id: p.template_id };
+    return { id: p.id, no: p.no, doc: p.doc, rev: p.rev, status: p.status, fit_pct: p.fit ?? null, locked_by: p.lock?.user ?? null, template_id: p.template_id };
   }
   private expire(p: PageRow) { if (p.lock && p.lock.until < this.now()) p.lock = undefined; }
 
@@ -155,6 +170,7 @@ export class MockBackend {
       p.versions.push({ rev: p.rev, at: new Date(this.now()).toISOString(), user: { id: u.id, name: u.name }, doc: structuredClone(p.doc) });
       return { status: 200, json: { rev: p.rev, doc: p.doc } };
     }
+    if (!sub && r.method === "GET") return { status: 200, json: this.pageOut(p) };
     if (sub === "versions" && r.method === "GET") return { status: 200, json: { versions: [...p.versions].reverse() } };
     if (sub === "restore" && r.method === "POST") {
       if (u.role === "viewer") return err(403, "forbidden", "Your role cannot restore pages");
