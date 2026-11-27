@@ -3,6 +3,7 @@ import { prisma } from "../db.js";
 import { allow } from "../lib/ratelimit.js";
 import { audit, COOKIE, listMyPapers, hashPassword, hashToken, newToken, requireRole, sessionExpiry, verifyPassword } from "../auth.js";
 import { ApiError } from "../errors.js";
+import { clearSsoCookies, setSsoCookie } from "../sso.js";
 import { aiOnFor } from "./content.js";
 import type { App } from "./types.js";
 
@@ -29,6 +30,7 @@ export function authRoutes(app: App) {
     await prisma.session.create({ data: { token_hash: hashToken(token), user_id: user.id, paper_id: m.paper_id, expires_at: sessionExpiry() } });
     await audit(m.paper_id, user.id, "login", "session", null, null, null);
     reply.setCookie(COOKIE, token, { httpOnly: true, sameSite: "lax", path: "/", secure: req.protocol === "https", expires: sessionExpiry() });
+    await setSsoCookie(req, reply, { id: user.id, email: user.email }, mine.some((x) => x.role === "owner" && live.some((p) => p.id === x.paper_id)));
     return { ok: true, paper_id: m.paper_id, role: m.role };
   });
 
@@ -36,6 +38,7 @@ export function authRoutes(app: App) {
     const tok = req.cookies[COOKIE];
     if (tok) await prisma.session.updateMany({ where: { token_hash: hashToken(tok) }, data: { revoked_at: new Date() } });
     reply.clearCookie(COOKIE, { path: "/" });
+    clearSsoCookies(req, reply);
     return { ok: true };
   });
 

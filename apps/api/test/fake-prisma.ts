@@ -54,7 +54,11 @@ function table(pk: string[] | string = "id", defaults: () => Row = () => ({})) {
 }
 
 export function makeFake() {
+  const notes: any[] = [];
   return {
+    /** what was announced with pg_notify (parsed), oldest first */
+    notes,
+    async $executeRaw(_strings: TemplateStringsArray, ...vals: any[]) { try { notes.push(JSON.parse(vals[0])); } catch { /* not an event */ } return 1; },
     paper: table(), user: table(), membership: table([]), session: table(), apiKey: table(), source: table(),
     article: table(), edition: table(), page: table(), pageVersion: table(), export: table(), epEdition: table(),
     webhook: table(), webhookDelivery: table(), auditLog: table(), pageArticle: table([]), asset: table(),

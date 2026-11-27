@@ -5,6 +5,7 @@ import path from "node:path";
 import { buildEdition, type EditionResult } from "@epaper/epaper";
 import { LayoutSnapshotSchema, PageDocSchema, type Zone } from "@epaper/core";
 import { prisma } from "../db.js";
+import { publishEvent } from "../events.js";
 import { day, driver, emitWebhook, loadArticles, storeFile, type JobCtx } from "../ctx.js";
 import type { Envelope } from "../main.js";
 
@@ -60,6 +61,7 @@ export async function epaperBuild(e: Envelope, job: JobCtx) {
       return r;
     });
     await prisma.epEdition.update({ where: { id: ep.id }, data: { status: "ready", error: null, pdf_hash: res.sha256, misses: res.misses as any } });
+    await publishEvent({ type: "edition.exported", paper_id: ep.paper_id, export_id: ep.export_id ?? ep.id, edition_id: ep.edition_id ?? null, format: "epaper", status: "done" });
   } catch (err) {
     await prisma.epEdition.update({ where: { id: ep.id }, data: { status: job.final ? "failed" : "building", error: (err as Error).message } }).catch(() => {});
     throw err;
@@ -83,6 +85,7 @@ export async function epaperReplacePage(e: Envelope) {
     await savePage(e.paper_id, ep.id, no, (last?.version ?? 0) + 1, true, r.pages[0]!, srcHash);
   });
   await prisma.epEdition.update({ where: { id: ep.id }, data: { version: { increment: 1 } } });
+  if (ep.status === "published") await publishEvent({ type: "edition.updated", paper_id: e.paper_id, ep_edition_id: ep.id, edition_id: ep.edition_id ?? null, date: day(ep.date), version: ep.version + 1 });
   if (ep.status === "published") {
     const paper = await prisma.paper.findUniqueOrThrow({ where: { id: e.paper_id } });
     await emitWebhook(e.paper_id, "page.replaced", { event: "page.replaced", paper: paper.slug, edition: day(ep.date), page: no, url: `${process.env.PUBLIC_BASE_URL ?? "http://127.0.0.1:8100"}/v1/public/editions/${ep.id}/pages` });
@@ -94,6 +97,7 @@ export async function epaperPublish(e: Envelope) {
   const ep = await prisma.epEdition.findFirst({ where: { id: e.payload.ep_edition_id, paper_id: e.paper_id } });
   if (!ep || ep.status !== "scheduled") return;
   await prisma.epEdition.update({ where: { id: ep.id }, data: { status: "published", published_at: new Date() } });
+  await publishEvent({ type: "edition.published", paper_id: e.paper_id, ep_edition_id: ep.id, edition_id: ep.edition_id ?? null, date: day(ep.date), version: ep.version });
   const paper = await prisma.paper.findUniqueOrThrow({ where: { id: e.paper_id } });
   const n = await prisma.epPage.count({ where: { ep_edition_id: ep.id, rolled_back: false } });
   await emitWebhook(e.paper_id, "edition.published", { event: "edition.published", paper: paper.slug, edition: day(ep.date), pages: n, url: `${(e.payload.base as string) ?? ""}/v1/public/editions/${ep.id}/pages` });

@@ -76,6 +76,9 @@ importers:
       '@epaper/layout':
         specifier: workspace:*
         version: link:../../packages/layout
+      '@epaper/sso':
+        specifier: workspace:*
+        version: link:../../packages/sso
       '@fastify/cookie':
         specifier: 11.0.1
         version: 11.0.1
@@ -91,12 +94,19 @@ importers:
       fastify-type-provider-zod:
         specifier: 4.0.2
         version: 4.0.2(fastify@5.2.0)(zod@3.25.30)
+      pg:
+        specifier: 8.13.1
+        version: 8.13.1
       pg-boss:
         specifier: 10.1.6
         version: 10.1.6
       zod:
         specifier: 3.25.30
         version: 3.25.30
+    devDependencies:
+      '@types/pg':
+        specifier: 8.11.10
+        version: 8.11.10
 
   apps/editor:
     dependencies:

@@ -14,6 +14,7 @@ import { DbArticleStore, paperRef, sourceRef } from "../lib/domain.js";
 import { enqueue } from "../lib/enqueue.js";
 import { firstFilePart } from "../lib/multipart.js";
 import { storeFile } from "../lib/store.js";
+import { refreshSso } from "../sso.js";
 import type { App } from "./types.js";
 
 const Id = z.object({ id: z.string().uuid() });
@@ -36,9 +37,10 @@ export async function aiOnFor(paper_id: string): Promise<boolean> {
 
 export function contentRoutes(app: App, driver: FileDriver) {
   // ---- who am I (the editor opens with this) ----
-  app.get("/v1/me", { schema: { tags: ["auth"] }, preHandler: requireRole() }, async (req) => {
+  app.get("/v1/me", { schema: { tags: ["auth"] }, preHandler: requireRole() }, async (req, reply) => {
     const p = req.principal!;
     const u = p.user_id ? await prisma.user.findUnique({ where: { id: p.user_id } }) : null;
+    if (u) await refreshSso(req, reply, u).catch(() => undefined); // keeps the ops-desk sign-in fresh while someone works
     return { user: { id: p.user_id ?? "", name: u?.name ?? "", email: u?.email }, role: p.role, ai_enabled: await aiOnFor(p.paper_id), papers: p.user_id ? await listMyPapers(p.user_id, p.paper_id) : [] };
   });
 
