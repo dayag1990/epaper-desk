@@ -68,9 +68,10 @@
   .ep-top { padding: .15rem .5rem; gap: 0 .35rem; }
   .ep-brand .ep-word { display: none; }
   .ep-brand { min-height: 40px; }
-  .ep-links { min-width: 0; overflow-x: auto; }
+  .ep-links { order: 9; min-width: 0; max-width: 100%; overflow-x: auto; }
+  .ep-user b { display: none; }
+  .ep-slot .ep-btn, .ep-slot select { min-height: 40px; }
   .ep-links a { min-height: 40px; margin-bottom: -.15rem; border-bottom-width: 3px; padding: 0 .45rem; font-size: .95rem; }
-  .ep-user b { max-width: 8ch; }
   .ep-menu { position: fixed; left: .75rem; right: .75rem; top: 56px; width: auto; }
 }
 
@@ -83,7 +84,7 @@
 .ep-toast p { margin: .15rem 0 .4rem; }
 .ep-toast .ep-row { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; }
 @keyframes ep-slide { from { transform: translateX(110%); opacity: 0; } to { transform: none; opacity: 1; } }
-@media (max-width: 640px) { .ep-toasts { left: 12px; right: 12px; width: auto; } }
+@media (max-width: 640px) { .ep-toasts { left: 12px; right: 12px; width: auto; top: auto; bottom: calc(env(safe-area-inset-bottom, 0px) + 12px); } }
 
 /* ---- buttons ---- */
 .ep-btn { display: inline-flex; align-items: center; justify-content: center; gap: .4rem; min-height: 44px; padding: 0 1rem; font: 600 1rem/1 var(--font); color: var(--text); background: var(--surface); border: 2px solid var(--press); border-radius: var(--radius); cursor: pointer; text-decoration: none; touch-action: manipulation; transition: background var(--motion), transform var(--motion), box-shadow var(--motion); }

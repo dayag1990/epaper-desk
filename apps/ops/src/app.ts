@@ -84,7 +84,7 @@ export function buildApp(d: AppDeps) {
   const chrome = (req: FastifyRequest, extra: Partial<ui.Chrome> = {}): ui.Chrome => {
     const c = ssoClaims(req);
     const info = auth.sessionInfo(token(req));
-    return { links: linksFor(req), user: info.sso && c ? { name: c.email, email: c.email } : { name: "Owner (desk login)" }, ...extra };
+    return { links: linksFor(req), user: info.sso && c ? { name: c.email, email: c.email } : { name: "Desk login" }, ...extra };
   };
   const cookieOpts = () => ({ secure: cfg.secureCookie, domain: cfg.ssoCookieDomain });
 

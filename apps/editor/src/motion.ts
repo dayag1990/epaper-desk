@@ -62,13 +62,13 @@ export function useBlockMotion(ref: RefObject<HTMLElement | null>, ready: boolea
         const moved = movedBlocks(prev, next);
         for (const m of moved) {
           const el = stage.querySelector<HTMLElement>(`.story[data-item="${CSS.escape(m.id)}"]`);
-          if (!el) continue;
+          if (!el || el.classList.contains("sel")) continue; // the block being worked on jumps (its frame and handles are measured from it); the others glide
           running++;
           const a = el.animate(
             [{ transform: `translate(${m.dx}px, ${m.dy}px) scale(${m.sx}, ${m.sy})`, transformOrigin: "0 0" }, { transform: "none", transformOrigin: "0 0" }],
             { duration: GLIDE_MS, easing: "ease-out" },
           );
-          const end = () => { if (--running === 0) prev = readBoxes(stage); };
+          const end = () => { if (--running === 0) { prev = readBoxes(stage); window.dispatchEvent(new Event("resize")); } }; // then the selection frame measures the final boxes
           a.finished.then(end, end);
         }
         if (moved.length) stage.dataset.glide = String(Number(stage.dataset.glide ?? 0) + 1); // how many times blocks glided (so tests can see it ran)

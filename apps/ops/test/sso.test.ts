@@ -84,7 +84,7 @@ describe("one login: newsroom sign-in, then the 6-digit code once", () => {
     const cookie = await loginCookie(s);
     const r = await get(s, "/", cookie);
     expect(r.statusCode).toBe(200);
-    expect(r.body).toContain("Owner (desk login)");
+    expect(r.body).toContain("Desk login");
     expect(s.api.calls).toEqual([]);
     // and the newsroom path works just as well with the API stopped
     const secret = (s as unknown as { _secret: string })._secret;

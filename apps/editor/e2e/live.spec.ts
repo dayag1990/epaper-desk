@@ -93,7 +93,7 @@ test("alerts: an owner gets one toast and one bell count for an alert sent twice
   await expect(toast).toHaveCount(1, { timeout: 5000 });
   await expect(toast).toContainText("The worker needs you");
   await expect(page.getByTestId("bell-count")).toHaveText("1");
-  await expect(toast.getByRole("link", { name: "Open in ops desk" })).toHaveAttribute("href", /\/$/);
+  await expect(toast.getByRole("link", { name: "Open in ops desk" })).toHaveAttribute("href", "http://127.0.0.1:8181/");
   await toast.getByRole("button", { name: "Dismiss" }).click();
   await expect(page.getByTestId("alert-toast")).toHaveCount(0);
   await page.getByTestId("bell").click();

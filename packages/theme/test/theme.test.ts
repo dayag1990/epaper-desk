@@ -56,7 +56,7 @@ describe("top bar (HTML version)", () => {
   });
 });
 
-const ev = (id: string, over: Partial<AlertEvent> = {}): AlertEvent => ({ id, episode: id.split(":")[0]!, kind: "fired", key: "k", title: "The worker stopped", text: "Press fix.", at: "2026-11-27T10:00:00Z", seq: 1, ...over });
+const ev = (id: string, over: Partial<AlertEvent> = {}): AlertEvent => ({ id, episode: id.split(":")[0]!, kind: "fired", key: "k", title: "The worker stopped", text: "Press fix.", at: "2026-11-27T10:00:00Z", seq: 1, link: "/", ...over });
 
 describe("alert feed", () => {
   it("takes one id once: one toast, one row, one unread", () => {
@@ -138,6 +138,7 @@ describe("openStream", () => {
     expect(feed.getSnapshot().toasts.length).toBe(1);
     expect(feed.getSnapshot().items.length).toBe(1);
     expect(FakeES.all[0]!.init?.withCredentials).toBe(true);
+    expect(feed.getSnapshot().toasts[0]!.href).toBe("http://ops.test/"); // the desk's "/" becomes the desk's address
     FakeES.all[0]!.onerror!(); vi.advanceTimersByTime(20);
     expect(FakeES.all[1]!.url).toBe("http://ops.test/ops/alerts/stream?since=5");
     st.close(); vi.useRealTimers();

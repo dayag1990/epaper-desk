@@ -146,6 +146,9 @@ export class AlertFeed {
 }
 
 /** The ops desk's alert stream, as the bell and the toasts need it. */
+/** The desk sends "/" as the place to fix things; on another app's page that must point at the desk, not at the app. */
+const aimAtDesk = (base: string, a: AlertEvent): AlertEvent => { try { return { ...a, link: new URL(a.link ?? "/", base.endsWith("/") ? base : base + "/").href }; } catch { return a; } };
+
 export function connectAlerts(o: { base: string; feed: AlertFeed; withCredentials?: boolean; EventSourceCtor?: typeof EventSource; onStatus?: (s: StreamStatus) => void; backoff?: StreamOpts["backoff"] }): Stream {
   const url = () => `${o.base.replace(/\/$/, "")}/ops/alerts/stream?since=${o.feed.getSnapshot().lastSeq}`;
   return openStream({
@@ -154,9 +157,9 @@ export function connectAlerts(o: { base: string; feed: AlertFeed; withCredential
       // what is already on the list when the page opens: fills the bell, no toast ("firing" ones do pop up, once)
       snapshot: (d: { recent?: AlertEvent[]; firing?: AlertEvent[] }) => {
         const firing = new Set((d.firing ?? []).map((a) => a.id));
-        for (const a of [...(d.recent ?? [])].reverse()) o.feed.push(a, { live: firing.has(a.id) });
+        for (const a of [...(d.recent ?? [])].reverse()) o.feed.push(aimAtDesk(o.base, a), { live: firing.has(a.id) });
       },
-      alert: (a: AlertEvent) => void o.feed.push(a),
+      alert: (a: AlertEvent) => void o.feed.push(aimAtDesk(o.base, a)),
     },
   });
 }
