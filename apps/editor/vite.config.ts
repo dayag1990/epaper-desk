@@ -3,6 +3,7 @@ import react from "@vitejs/plugin-react";
 import { fileURLToPath } from "node:url";
 
 const layoutSrc = fileURLToPath(new URL("../../packages/layout/src", import.meta.url));
+const coreJumps = fileURLToPath(new URL("../../packages/core/src/jumps.ts", import.meta.url));
 const coreSrc = fileURLToPath(new URL("../../packages/core/src/index.ts", import.meta.url));
 
 // The editor uses the SAME renderPage/paperCss/domFill/domFrames/domReady source as the server.
@@ -12,6 +13,7 @@ export default defineConfig({
   resolve: {
     alias: [
       { find: /^@epaper\/layout\/src\/(.*)\.js$/, replacement: layoutSrc + "/$1.ts" },
+      { find: "@epaper/core/jumps", replacement: coreJumps }, // pure helper; the barrel pulls in node:crypto
       { find: "@epaper/core", replacement: coreSrc },
     ],
   },

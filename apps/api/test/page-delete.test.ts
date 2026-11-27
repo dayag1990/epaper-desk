@@ -102,4 +102,24 @@ describe("DELETE /v1/pages/:id", () => {
     r = await a.inject({ method: "DELETE", url: `/v1/pages/${pages[0].id}`, headers: as("ed") });
     expect(r.statusCode).toBe(409); expect(r.json().message).toMatch(/only page/);
   });
+
+  it("keeps \"Continued on page N\" lines right: the page number follows the renumbering, and a line whose other half was on the deleted page goes", async () => {
+    await user("ed", "editor");
+    const doc = (no: number, items: any[]) => ({ page: { no, body_pt: 9 }, items, status: "draft", rev: 3 });
+    // page 1 runs on to page 3 (it_b); page 4 runs on to page 2 (it_d), which is about to be deleted
+    await db.page.update({ where: { id: pages[0].id }, data: { doc: doc(1, [{ id: "it_a", jump: { role: "to", pair: "it_b", page: 3 } }]) } });
+    await db.page.update({ where: { id: pages[1].id }, data: { doc: doc(2, [{ id: "it_d", jump: { role: "from", pair: "it_c", page: 4 } }]) } });
+    await db.page.update({ where: { id: pages[2].id }, data: { doc: doc(3, [{ id: "it_b", jump: { role: "from", pair: "it_a", page: 1 } }]) } });
+    await db.page.update({ where: { id: pages[3].id }, data: { doc: doc(4, [{ id: "it_c", jump: { role: "to", pair: "it_d", page: 2 } }]) } });
+    const r = await a.inject({ method: "DELETE", url: `/v1/pages/${pages[1].id}`, headers: as("ed") });
+    expect(r.statusCode).toBe(200);
+    const doc1 = db.page.rows.find((x) => x.id === pages[0].id)!.doc as any;
+    expect(doc1.items[0].jump).toEqual({ role: "to", pair: "it_b", page: 2 }); // was page 3, now page 2
+    const doc3 = db.page.rows.find((x) => x.id === pages[2].id)!.doc as any;
+    expect(doc3.page.no).toBe(2);
+    expect(doc3.items[0].jump).toEqual({ role: "from", pair: "it_a", page: 1 });
+    const doc4 = db.page.rows.find((x) => x.id === pages[3].id)!.doc as any;
+    expect(doc4.items[0].jump).toBeUndefined(); // its other half went back to the tray with the deleted page
+    expect(db.pageVersion.rows.some((x) => x.page_id === pages[0].id && x.source === "renumber")).toBe(true);
+  });
 });

@@ -15,10 +15,16 @@ export function buildSeed(origin = ""): MockSeed {
   const articles = raw.articles.map((a) => ({ ...a, images: a.images.map((im) => ({ ...im, src: `${origin}/mock-assets/${im.asset_id}.svg` })) }));
   const bodyPt = (t: Template) => +((t.body.start_px * t.size.w_mm) / t.canvas_px / 25.4 * 72).toFixed(3);
 
+  // The demo pages keep their fixed 5-3-3-2-3 layout whatever the template's own slots are (the templates now plan an uneven page).
+  const SLOTS = [
+    { id: "story_col_span-5-1", span: 5, cols: 5, kind: "story", image: true }, { id: "story_col_span-3-2", span: 3, cols: 3, kind: "story", image: true },
+    { id: "story_col_span-3-3", span: 3, cols: 3, kind: "story", image: true }, { id: "story_col_span-2-4", span: 2, cols: 2, kind: "story", image: false },
+    { id: "story_col_span-3-5", span: 3, cols: 3, kind: "story", image: false },
+  ] as const;
   const make = (no: number, tid: string, slotIdx: number[], arts: number[], paras: number): PageDoc => {
     const t = tpl(tid);
     const items: PageItem[] = slotIdx.map((si, n) => {
-      const s = t.slots[si]!;
+      const s = SLOTS[si]!;
       const a = articles[arts[n]!]!;
       const body = a.body.filter((b) => b.t === "p").slice(0, paras).map((b) => b.text);
       const it: PageItem = {

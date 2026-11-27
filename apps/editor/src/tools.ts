@@ -1,4 +1,5 @@
-import type { PageDoc, PageItem } from "@epaper/core";
+import type { BlockStyle, PageDoc, PageItem } from "@epaper/core";
+import { syncJumps } from "@epaper/core/jumps";
 import { defaultRatio, defaultSpan, packedSpans, type Template } from "./layout";
 import { clampCols, clampSpan, moveInOrder, rowStep, slotsOf } from "./flow";
 
@@ -195,7 +196,7 @@ export function setCutout(docs: Docs, pageId: string, itemId: string, assetId: s
 
 /** Text typed in the page, read back from the DOM (see PageView.readText). */
 export interface TextSnapshot {
-  items: { id: string; kicker?: string; head?: string; sub?: string; body?: string[] }[];
+  items: { id: string; kicker?: string; head?: string; sub?: string; byline?: string; body?: string[] }[];
   furniture?: { masthead?: string; tagline?: string; strip?: string[] };
 }
 export function applyText(doc: PageDoc, s: TextSnapshot): PageDoc {
@@ -208,6 +209,7 @@ export function applyText(doc: PageDoc, s: TextSnapshot): PageDoc {
     if (sn.kicker !== undefined && sn.kicker !== (tx.kicker ?? "")) next.kicker = sn.kicker;
     if (sn.head !== undefined && sn.head !== tx.head) next.head = sn.head;
     if (sn.sub !== undefined && sn.sub !== (tx.sub ?? "")) next.sub = sn.sub === "" && tx.sub == null ? tx.sub : sn.sub;
+    if (sn.byline !== undefined && sn.byline !== (tx.byline ?? "")) next.byline = sn.byline;
     if (sn.body !== undefined && JSON.stringify(sn.body) !== JSON.stringify(tx.body)) next.body = sn.body;
     if (JSON.stringify(next) === JSON.stringify(tx)) return it;
     changed = true;
@@ -245,7 +247,7 @@ export function addStory(docs: Docs, pageId: string, afterId: string | null, id:
 export function placeArticle(
   docs: Docs,
   pageId: string,
-  a: { id: string; rev: number; kicker?: string | null; headline: string; subhead?: string | null; paras: string[]; image?: { asset_id: string } },
+  a: { id: string; rev: number; kicker?: string | null; headline: string; subhead?: string | null; byline?: string | null; dateline?: string | null; paras: string[]; image?: { asset_id: string } },
   id: string = newItemId(),
 ): Docs {
   const d = docs[pageId];
@@ -259,7 +261,7 @@ export function placeArticle(
     span: 4,
     cols: 4,
     hs: 1,
-    text: { kicker: a.kicker ?? null, head: a.headline, sub: a.subhead ?? null, body: a.paras },
+    text: { kicker: a.kicker ?? null, head: a.headline, sub: a.subhead ?? null, body: a.paras, ...(a.byline ? { byline: a.byline } : {}), ...(a.dateline ? { dateline: a.dateline } : {}) },
     ...(a.image ? { image: { asset_id: a.image.asset_id as never, ratio: 2.3, cutout: false, focal: [0.5, 0.4] as [number, number] } } : {}),
   };
   return { ...docs, [pageId]: { ...d, items: [...d.items, item] } };
@@ -280,4 +282,46 @@ export function setPageSize(docs: Docs, pageId: string, sizeId: string): Docs {
 export function setStatus(docs: Docs, pageId: string, status: string): Docs {
   const d = docs[pageId];
   return d ? { ...docs, [pageId]: { ...d, status } } : docs;
+}
+
+// ---------------------------------------------------------------- newspaper finish: the block "Style" control
+
+export const BLOCK_LABELS: Record<BlockStyle, string> = { plain: "Plain", brief: "Boxed brief", quote: "Pull quote", panel: "Tinted panel" };
+export interface StylePatch { block?: BlockStyle; dropcap?: boolean }
+
+/**
+ * Switch a block between plain / boxed brief / pull quote / tinted panel and turn its drop cap on or off. A plain block and a
+ * switched-off drop cap carry no field at all, so a page that never used the finish stays byte-identical. A pull quote needs room,
+ * so it is widened to at least 3 columns (the row packer reflows the rest).
+ */
+export function setBlockStyle(docs: Docs, pageId: string, itemId: string, patch: StylePatch): Docs {
+  return withItem(docs, pageId, itemId, (i) => {
+    if (i.kind === "ad") return i;
+    let next: PageItem = { ...i };
+    if (patch.block !== undefined) {
+      if (patch.block === "plain") { const { block: _b, ...rest } = next; next = rest as PageItem; }
+      else next.block = patch.block;
+      if (patch.block === "quote" && (next.span ?? 3) < 3) { next.span = 3; next.cols = Math.min(next.cols ?? 3, 3); }
+    }
+    if (patch.dropcap !== undefined) {
+      if (patch.dropcap) next.dropcap = true;
+      else { const { dropcap: _d, ...rest } = next; next = rest as PageItem; }
+    }
+    return next;
+  });
+}
+
+/**
+ * Keep the "Continued on page N" numbers right after any edit that can move a story between pages or change a page number.
+ * Returns the docs and the ids of pages whose doc changed (so they are saved too).
+ */
+export function syncDocs(docs: Docs, order: readonly string[]): { docs: Docs; changed: string[] } {
+  const list = order.map((id) => docs[id]).filter((d): d is PageDoc => !!d);
+  const ids = order.filter((id) => docs[id]);
+  if (!list.some((d) => d.items.some((i) => i.jump))) return { docs, changed: [] };
+  const out = syncJumps(list);
+  const changed: string[] = [];
+  const next = { ...docs };
+  out.forEach((d, k) => { if (d !== list[k]) { next[ids[k]!] = d; changed.push(ids[k]!); } });
+  return changed.length ? { docs: next, changed } : { docs, changed };
 }
