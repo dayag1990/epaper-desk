@@ -45,7 +45,8 @@ export function authRoutes(app: App) {
   app.get("/v1/auth/me", { schema: { tags: ["auth"] }, preHandler: requireRole() }, async (req) => {
     const p = req.principal!;
     const paper = await prisma.paper.findUnique({ where: { id: p.paper_id }, select: { id: true, slug: true, name: true, lang: true, script: true } });
-    return { paper, role: p.role, user_id: p.user_id, papers: p.user_id ? await listMyPapers(p.user_id, p.paper_id) : [] };
+    const u = p.user_id ? await prisma.user.findUnique({ where: { id: p.user_id } }) : null;
+    return { paper, role: p.role, user_id: p.user_id, user: u ? { name: u.name, email: u.email } : null, papers: p.user_id ? await listMyPapers(p.user_id, p.paper_id) : [] };
   });
 
   // ---- which papers can I switch to (only ones I am an active member of) ----

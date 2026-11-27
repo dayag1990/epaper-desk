@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { TopBar, useAlertFeed, useAppLinks } from "@epaper/theme/react";
 import type { Api } from "./api";
 import type { Me } from "./types";
 import { ApiError, plainError } from "./lib/words";
@@ -13,9 +14,7 @@ import { Connections } from "./screens/Connections";
 import { Activity } from "./screens/Activity";
 import { Settings } from "./screens/Settings";
 
-const OPS_URL = (import.meta.env.VITE_OPS_URL as string | undefined) ?? "http://127.0.0.1:8101/";
-
-function StatusLight({ api }: { api: Api }) {
+function StatusLight({ api, ops }: { api: Api; ops: string }) {
   const [ok, setOk] = useState<boolean | null>(null);
   useEffect(() => {
     let live = true;
@@ -26,7 +25,7 @@ function StatusLight({ api }: { api: Api }) {
   }, [api]);
   if (ok === null) return <span className="light grey" title="Checking">&nbsp;</span>;
   return ok ? <span className="light green" title="All systems are working" role="img" aria-label="All systems are working" />
-    : <a className="light red" href={OPS_URL} title="Something is wrong. Open the ops desk." aria-label="Something is wrong. Open the ops desk.">Problem: open the ops desk</a>;
+    : <a className="light red" href={ops} title="Something is wrong. Open the ops desk." aria-label="Something is wrong. Open the ops desk.">Problem: open the ops desk</a>;
 }
 
 export function App({ api }: { api: Api }) {
@@ -36,19 +35,25 @@ export function App({ api }: { api: Api }) {
   useEffect(() => { api.me().then(setMe).catch((e) => setMe(e instanceof ApiError && e.status === 401 ? null : null)); }, [api]);
   useEffect(() => { const f = () => setHash(location.hash); addEventListener("hashchange", f); return () => removeEventListener("hashchange", f); }, []);
   const signedOut = useCallback(() => setMe(null), []);
+  const links = useAppLinks();
+  const owner = typeof me === "object" && me !== null && me.role === "owner";
+  const feed = useAlertFeed(links.ops, owner);
 
   if (me === "loading") return <div className="center">Loading…</div>;
-  if (!me) return <Login api={api} onIn={setMe} />;
+  if (!me) return <div className="ep-app"><TopBar app="admin" links={links} isOwner={false} /><Login api={api} onIn={setMe} /></div>;
 
   const screen: Screen = parseScreen(hash, me.role);
   const props = { api, me, onSignedOut: signedOut };
   const logout = async () => { try { await api.logout(); } catch (e) { void plainError(e); } setMe(null); location.hash = ""; };
   return (
-    <div className="shell">
-      <header className="top">
-        <div className="brand"><strong data-testid="paper-name">{me.paper.name}</strong><StatusLight api={api} /><PaperSwitcher api={api} me={me} onSwitched={(m) => setMe(m)} /></div>
-        <div className="who"><span data-testid="role" title={ROLE_WORDS[me.role]}>{me.role}</span><button className="link" onClick={logout}>Sign out</button></div>
-      </header>
+    <div className="ep-app">
+      <TopBar app="admin" links={links} isOwner={owner} feed={feed} user={{ name: me.user?.name || me.user?.email || "You", email: me.user?.email }} onSignOut={logout}>
+        <strong data-testid="paper-name">{me.paper.name}</strong>
+        <StatusLight api={api} ops={links.ops} />
+        <PaperSwitcher api={api} me={me} onSwitched={(m) => setMe(m)} />
+        <span className="ep-badge" data-testid="role" title={ROLE_WORDS[me.role]}>{me.role}</span>
+      </TopBar>
+      <div className="shell">
       <nav className="nav" aria-label="Sections">
         {screensFor(me.role).map((s) => <a key={s} href={`#/${s}`} aria-current={s === screen ? "page" : undefined}>{SCREEN_NAMES[s]}</a>)}
       </nav>
@@ -62,6 +67,7 @@ export function App({ api }: { api: Api }) {
         {screen === "activity" && <Activity {...props} />}
         {screen === "settings" && <Settings {...props} />}
       </main>
+      </div>
     </div>
   );
 }
